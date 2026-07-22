@@ -1,0 +1,118 @@
+# Canary model-server tier (todo 29). The CANDIDATE half of the nginx
+# canary-weight split: `canary-ingress.yaml` routes ~10% of host
+# inferenceops.local traffic to `service-model-server-canary`, which selects the
+# pods created here. The stable 90% stays on `service-model-server` (fronted by
+# `stable-ingress.yaml`). See serving/fastapi/deployment.md for the full Oracle
+# F2 topology.
+#
+# Identity: the canary runs the SAME image as stable (inferenceops/model-server:dev)
+# but with MODEL_VERSION=2.0.0, so it loads the candidate artifact
+# (models/artifacts/fraud_detector_canary/, baked into the image by
+# scripts/deploy_canary.sh) and stamps model_version="2.0.0" on every response
+# and metric — the canary discriminator. `scripts/deploy_canary.sh` overrides
+# MODEL_VERSION to the requested `make deploy-canary MODEL_VERSION=<v>` value via
+# `kubectl set env` (a no-op when it already matches the default below).
+#
+# Deliberately lean vs the stable Deployment (k8s/base/deployment-model-server.yaml):
+#   - replicas: 1 — the split is by ingress WEIGHT, not replica count; one canary
+#     pod is enough to absorb 10% and keeps the footprint small.
+#   - smaller cpu/memory REQUESTS (500m/1Gi) — the canary serves a fraction of
+#     traffic; limits still match stable (2/4Gi) so the model load is unconstrained.
+# Probes, graceful shutdown (preStop + 30s grace) and imagePullPolicy: Never
+# (images are `kind load`'d; there is no registry) mirror the stable tier.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: model-server-canary
+  labels:
+    app.kubernetes.io/name: model-server-canary
+    app.kubernetes.io/component: serving
+    app.kubernetes.io/part-of: inferenceops
+    inferenceops.dev/tier: canary
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: model-server-canary
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: model-server-canary
+        app.kubernetes.io/component: serving
+        app.kubernetes.io/part-of: inferenceops
+        inferenceops.dev/tier: canary
+    spec:
+      # Reuse the model-server ServiceAccount (k8s/base/serviceaccount.yaml).
+      serviceAccountName: model-server
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: model-server
+          image: inferenceops/model-server:dev
+          # kind-loaded; no registry to pull from.
+          imagePullPolicy: Never
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            # Candidate identity. MODEL_VERSION is the canary discriminator and is
+            # set to the deploy-canary MODEL_VERSION (default 2.0.0). MODEL_ID stays
+            # fraud-detector so it resolves the candidate artifact by metadata.
+            - name: MODEL_ID
+              value: "fraud-detector"
+            - name: MODEL_VERSION
+              value: "2.0.0"
+            - name: LOG_LEVEL
+              value: "info"
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2"
+              memory: "4Gi"
+          # Readiness: 503 until the candidate model loads, 200 after — the
+          # canary Service only routes to Ready pods, so a failed candidate load
+          # takes the canary out of rotation instead of erroring traffic.
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 10"]
+---
+# Canary Service: selects ONLY the canary pods (label model-server-canary), so it
+# never overlaps the stable `service-model-server`. The canary Ingress points its
+# backend here.
+apiVersion: v1
+kind: Service
+metadata:
+  name: service-model-server-canary
+  labels:
+    app.kubernetes.io/name: model-server-canary
+    app.kubernetes.io/component: serving
+    app.kubernetes.io/part-of: inferenceops
+    inferenceops.dev/tier: canary
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: model-server-canary
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP

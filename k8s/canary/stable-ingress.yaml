@@ -1,0 +1,39 @@
+# Stable (main) ingress for the canary demo (todo 29) — Oracle F2 topology.
+#
+# This REPLACES the base ingress (k8s/base/ingress.yaml) for host
+# inferenceops.local during the canary window: it carries the SAME object name
+# (`inferenceops`), so `kubectl apply -f stable-ingress.yaml` overwrites the base
+# ingress in place. The two do NOT coexist — coexisting same-host ingresses with
+# different backends is undefined nginx behavior.
+#
+# The key change vs the base ingress: the backend is the MODEL-SERVER tier
+# (service-model-server), NOT the gateway. During the canary demo the gateway
+# (auth/rate-limit) is deliberately BYPASSED so the 90/10 split happens cleanly
+# at the model-server tier; `scripts/rollback.sh` (and promote) reinstate the
+# base ingress (-> service-gateway), restoring auth/rate-limit.
+#
+# This is the "main" ingress of the nginx canary pair: `canary-ingress.yaml`
+# (canary: "true", same host) is merged into it by the controller, which routes
+# canary-weight% to the candidate and the rest here (stable).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: inferenceops
+  labels:
+    app.kubernetes.io/name: model-server
+    app.kubernetes.io/component: edge
+    app.kubernetes.io/part-of: inferenceops
+    inferenceops.dev/tier: stable
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: inferenceops.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: service-model-server
+                port:
+                  number: 8080

@@ -1,0 +1,41 @@
+# Canary ingress (todo 29) — the CANDIDATE half of the nginx canary-weight pair.
+#
+# nginx canary annotations (ingress-nginx controller v1.15.1):
+#   nginx.ingress.kubernetes.io/canary: "true"        — mark this Ingress as a canary
+#   nginx.ingress.kubernetes.io/canary-weight: "10"   — route 10% of traffic here
+#
+# Rules for the canary annotation to take effect:
+#   - it MUST share the SAME host as the main ingress (inferenceops.local — see
+#     stable-ingress.yaml); the controller merges the canary into the main
+#     server block and splits by weight.
+#   - ingressClassName: nginx (same controller as the main ingress).
+#
+# Backend: service-model-server-canary (the candidate model-server tier, which
+# reports model_version="2.0.0"). `scripts/promote.sh` raises canary-weight to
+# 100 (100% candidate); `scripts/rollback.sh` deletes this Ingress entirely
+# (0% candidate) and restores the base ingress.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: inferenceops-canary
+  labels:
+    app.kubernetes.io/name: model-server-canary
+    app.kubernetes.io/component: edge
+    app.kubernetes.io/part-of: inferenceops
+    inferenceops.dev/tier: canary
+  annotations:
+    nginx.ingress.kubernetes.io/canary: "true"
+    nginx.ingress.kubernetes.io/canary-weight: "10"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: inferenceops.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: service-model-server-canary
+                port:
+                  number: 8080

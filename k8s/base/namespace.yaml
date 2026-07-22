@@ -1,0 +1,10 @@
+# Namespace for all InferenceOps workloads (todo 16).
+# Cluster-scoped: kustomize's `namespace:` transformer leaves this resource
+# cluster-scoped (it does NOT stamp metadata.namespace onto a Namespace).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: inferenceops
+  labels:
+    app.kubernetes.io/name: inferenceops
+    app.kubernetes.io/part-of: inferenceops

@@ -1,0 +1,27 @@
+# Kustomize base for InferenceOps (todo 16). Overlays (todo 18: local/staging/
+# prod) build on this. The ingress/HPA/PDB (todo 17) are added to this base too.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Stamp every namespaced resource into the inferenceops namespace (the
+# cluster-scoped Namespace resource is left untouched by this transformer).
+namespace: inferenceops
+
+# Common labels on metadata only. includeSelectors:false keeps these OUT of
+# Deployment selectors / pod-template labels (avoids the immutable-selector
+# footgun and keeps the hand-written selectors authoritative).
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: inferenceops
+      app.kubernetes.io/managed-by: kustomize
+    includeSelectors: false
+
+resources:
+  - namespace.yaml
+  - serviceaccount.yaml
+  - configmap.yaml
+  - secret.example.yaml
+  - deployment-model-server.yaml
+  - deployment-gateway.yaml
+  - service-model-server.yaml
+  - service-gateway.yaml

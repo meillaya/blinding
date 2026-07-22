@@ -1,0 +1,20 @@
+# Non-secret runtime config (todo 16). Shared by both apps; each Deployment
+# pulls only the keys it reads (model-server: MODEL_ID/MODEL_VERSION/LOG_LEVEL;
+# gateway: RATE_LIMIT_RPS/LOG_LEVEL). Secrets (API keys) live in the Secret,
+# NOT here.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: inferenceops-config
+  labels:
+    app.kubernetes.io/name: inferenceops-config
+    app.kubernetes.io/part-of: inferenceops
+data:
+  # Identity the model-server stamps onto every prediction (/v1/predict,
+  # /v1/batch, /v1/models). Read by inferenceops_model_server.server.
+  MODEL_ID: "fraud-detector"
+  MODEL_VERSION: "1.0.0"
+  # Gateway token-bucket rate limit (requests/sec per client); parsed as float.
+  RATE_LIMIT_RPS: "100"
+  # Shared log verbosity (uvicorn/python). Informational, non-secret.
+  LOG_LEVEL: "info"

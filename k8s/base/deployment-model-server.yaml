@@ -1,0 +1,102 @@
+# model-server Deployment (todo 16). Serves /v1/predict, /v1/batch, /v1/models,
+# /metrics, /healthz (liveness), /readyz (readiness — 503 until the model loads)
+# on port 8080. GPU nodeSelector/tolerations are deliberately ABSENT here: they
+# belong in the prod overlay (todo 18), not base.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: model-server
+  labels:
+    app.kubernetes.io/name: model-server
+    app.kubernetes.io/component: serving
+    app.kubernetes.io/part-of: inferenceops
+spec:
+  replicas: 2
+  # Zero-downtime rollouts: never drop below desired replicas (maxUnavailable:0),
+  # bring up exactly one extra pod at a time (maxSurge:1).
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: model-server
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: model-server
+        app.kubernetes.io/component: serving
+        app.kubernetes.io/part-of: inferenceops
+    spec:
+      serviceAccountName: model-server
+      # Graceful shutdown (pairs with the server's SIGTERM drain, todo 9):
+      # preStop sleeps 10s so the Service stops sending NEW traffic and in-flight
+      # requests drain, then SIGTERM; 30s total grace before SIGKILL.
+      terminationGracePeriodSeconds: 30
+      # Spread replicas across nodes (best-effort) so a single node loss does not
+      # take out all model-server pods.
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: model-server
+      containers:
+        - name: model-server
+          image: inferenceops/model-server:dev
+          # Images are `kind load`'d (todo 19); there is no registry to pull from.
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: MODEL_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: inferenceops-config
+                  key: MODEL_ID
+            - name: MODEL_VERSION
+              valueFrom:
+                configMapKeyRef:
+                  name: inferenceops-config
+                  key: MODEL_VERSION
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: inferenceops-config
+                  key: LOG_LEVEL
+          resources:
+            requests:
+              cpu: "2"
+              memory: "4Gi"
+            limits:
+              cpu: "4"
+              memory: "8Gi"
+          # Readiness: 503 until the model is loaded, 200 after. Generous
+          # failureThreshold tolerates a slow model load without killing the pod.
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 30
+          # Liveness: 200 once the process is up (independent of model load).
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 10"]

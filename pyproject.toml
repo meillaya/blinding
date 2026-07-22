@@ -39,7 +39,7 @@ inferenceops-model-server = { workspace = true }
 inferenceops-worker = { workspace = true }
 
 [tool.pytest.ini_options]
-testpaths = ["apps", "tests"]
+testpaths = ["apps", "tests", "models/registry"]
 addopts = ["--strict-markers", "--cov"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"

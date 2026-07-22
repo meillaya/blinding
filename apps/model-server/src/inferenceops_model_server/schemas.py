@@ -1,16 +1,30 @@
-"""Request/response schemas for the model server API (stub)."""
+"""Request/response schemas for the model server API.
+
+Structural validation lives here: finite floats, non-empty feature rows and
+batches, probability bounds. Arity against the loaded model (e.g. exactly 20
+features) is enforced by ``predictor.predict``, which is the layer that knows
+the model's ``n_features_in_``. Typed errors are re-exported from
+``inferenceops_model_server.errors`` for API-layer convenience.
+"""
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from typing import Annotated
+
+from pydantic import AllowInfNan, BaseModel, ConfigDict, Field
+
+from inferenceops_model_server.errors import FeatureCountMismatch as FeatureCountMismatch
+from inferenceops_model_server.errors import ModelNotFound as ModelNotFound
+
+type FiniteFloat = Annotated[float, AllowInfNan(False)]
 
 
 class PredictRequest(BaseModel):
-    """A single prediction request."""
+    """A single prediction request: one non-empty row of finite features."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
-    features: list[float]
+    features: list[FiniteFloat] = Field(min_length=1)
 
 
 class PredictResponse(BaseModel):
@@ -19,17 +33,17 @@ class PredictResponse(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     prediction: int
-    score: float
+    score: float = Field(ge=0.0, le=1.0)
     model_id: str
     model_version: str
 
 
 class BatchRequest(BaseModel):
-    """A batch of prediction requests."""
+    """A batch of one or more prediction requests."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
-    requests: list[PredictRequest]
+    requests: list[PredictRequest] = Field(min_length=1)
 
 
 class BatchResponse(BaseModel):
@@ -43,16 +57,7 @@ class BatchResponse(BaseModel):
 class ModelInfo(BaseModel):
     """Metadata describing a registered model artifact."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     model_id: str
     version: str
-
-
-class ModelNotFound(Exception):
-    """Raised when a requested model artifact does not exist."""
-
-    def __init__(self, model_id: str, version: str) -> None:
-        self.model_id = model_id
-        self.version = version
-        super().__init__(f"model {model_id!r} version {version!r} not found")

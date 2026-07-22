@@ -1,4 +1,4 @@
-"""Model artifact storage backends (stub)."""
+"""Model artifact storage backends."""
 
 from inferenceops_model_server.storage.base import ModelStorage
 from inferenceops_model_server.storage.local import LocalStorageBackend

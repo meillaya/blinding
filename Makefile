@@ -24,7 +24,7 @@ help: ## Show available targets and their descriptions
 
 ## Local development
 run-local: ## Run the model server locally on :8080 (uvicorn)
-	cd apps/model-server && uv run uvicorn server:app --host 0.0.0.0 --port 8080
+	cd apps/model-server && PYTHONPATH=src uv run uvicorn inferenceops_model_server.server:app --host 0.0.0.0 --port 8080
 
 ## Quality gates
 test: ## Run the test suite with pytest (with coverage)

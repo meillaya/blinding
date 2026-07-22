@@ -1,0 +1,16 @@
+# devenv.sh input configuration.
+# devenv splits config: this YAML file holds ONLY flake inputs / nixpkgs.* options;
+# packages, languages, processes, etc. live in devenv.nix.
+# Refs: https://devenv.sh/reference/yaml-options/ , https://devenv.sh/reference/options/
+inputs:
+  nixpkgs:
+    url: github:NixOS/nixpkgs?ref=nixos-25.05
+  nixpkgs-python:
+    url: github:cachix/nixpkgs-python
+    inputs:
+      nixpkgs:
+        follows: nixpkgs
+
+# terraform >= 1.6 is BUSL-licensed (unfree); required for `pkgs.terraform`.
+nixpkgs:
+  allow_unfree: true

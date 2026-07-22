@@ -1,0 +1,87 @@
+# InferenceOps — build, scan, and (gated) publish the model-server image.
+#
+# Pipeline on push to main:
+#   1. make docker-build                              build the image
+#   2. trivy image --severity HIGH,CRITICAL --exit-code 1   fail on HIGH/CRITICAL CVEs
+#   3. ECR push — gated on main AND secret presence (OIDC role + ECR registry).
+#
+# Security:
+#   - No inline secrets: every credential/registry value comes from
+#     ${{ secrets.* }}; AWS auth is OIDC (aws-actions/configure-aws-credentials
+#     with role-to-assume, no static keys), enabled by id-token: write.
+#   - The push steps are guarded by the `publish-gate` step, which maps the
+#     required secrets into its env and emits `enabled=true` only on main with
+#     all secrets present (the secrets context is not usable in `if:`
+#     expressions, so the check runs in a shell). On forks/mirrors without the
+#     secrets the workflow still builds + scans and simply skips publishing.
+name: build-and-push
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: inferenceops/model-server:dev
+
+jobs:
+  build-scan-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # required for AWS OIDC role assumption
+    env:
+      # GitHub-hosted runner docker socket; overrides the Makefile's rootless
+      # default (DOCKER_HOST ?= ...) for this job only.
+      DOCKER_HOST: unix:///var/run/docker.sock
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build model-server image
+        run: make docker-build IMAGE="${IMAGE}"
+
+      - name: Install Trivy
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b "${RUNNER_TEMP}/trivy-bin" v0.56.2
+          echo "${RUNNER_TEMP}/trivy-bin" >> "${GITHUB_PATH}"
+
+      - name: Scan image (fail on HIGH/CRITICAL CVEs)
+        run: trivy image --severity HIGH,CRITICAL --exit-code 1 "${IMAGE}"
+
+      - name: Publish gate (main + required secrets present)
+        id: publish-gate
+        env:
+          AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+          ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
+        run: |
+          if [ "${GITHUB_REF_NAME}" = "main" ] && [ -n "${AWS_ROLE_ARN}" ] && [ -n "${ECR_REGISTRY}" ]; then
+            echo "enabled=true" >> "${GITHUB_OUTPUT}"
+            echo "publish gate: enabled (main + secrets present)"
+          else
+            echo "enabled=false" >> "${GITHUB_OUTPUT}"
+            echo "publish gate: disabled (not main or secrets absent) — build + scan only"
+          fi
+
+      - name: Configure AWS credentials (OIDC, no static keys)
+        if: steps.publish-gate.outputs.enabled == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        if: steps.publish-gate.outputs.enabled == 'true'
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Tag and push image to ECR
+        if: steps.publish-gate.outputs.enabled == 'true'
+        env:
+          ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
+          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+        run: |
+          docker tag "${IMAGE}" "${ECR_REGISTRY}/${ECR_REPOSITORY}:${GITHUB_SHA}"
+          docker tag "${IMAGE}" "${ECR_REGISTRY}/${ECR_REPOSITORY}:latest"
+          docker push "${ECR_REGISTRY}/${ECR_REPOSITORY}:${GITHUB_SHA}"
+          docker push "${ECR_REGISTRY}/${ECR_REPOSITORY}:latest"

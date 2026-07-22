@@ -1,0 +1,72 @@
+# InferenceOps CI — quality gates on every push and pull request.
+#
+# Jobs (each runs the matching Makefile target directly):
+#   lint         make lint          ruff
+#   typecheck    make typecheck     basedpyright (strict)
+#   test         make test          pytest + coverage
+#   docker-build make docker-build  model-server container image
+#
+# Python is uv-managed: astral-sh/setup-uv installs uv + the pinned Python
+# interpreter and caches the uv download/cache directories. The docker-build
+# job points DOCKER_HOST at the GitHub-hosted runner's docker socket; the
+# Makefile uses `DOCKER_HOST ?=`, so this environment value wins there while
+# local rootless-docker setups keep their own socket.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Lint (ruff)
+        run: make lint
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Typecheck (basedpyright, strict)
+        run: make typecheck
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Test (pytest + coverage)
+        run: make test
+
+  docker-build:
+    runs-on: ubuntu-latest
+    env:
+      # GitHub-hosted runner docker socket; overrides the Makefile's rootless
+      # default (DOCKER_HOST ?= ...) for this job only.
+      DOCKER_HOST: unix:///var/run/docker.sock
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build model-server image
+        run: make docker-build

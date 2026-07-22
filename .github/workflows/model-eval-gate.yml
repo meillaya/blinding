@@ -1,0 +1,39 @@
+# InferenceOps — model evaluation gate for pull requests.
+#
+# Runs the eval gates (todo 13) via `make eval` -> scripts/run_evals.sh:
+#   1. run_eval.py        accuracy gate (>= 0.85) + report
+#   2. latency_gate.py    p95 in-process predict latency (< 100 ms)
+#   3. regression_gate.py no accuracy/f1 regression vs evals/reports/baseline.json
+#
+# Any gate failure exits non-zero and fails the PR check.
+#
+# The model artifact (models/artifacts/**/*.pkl) is gitignored, so the gate
+# first trains it with `make train` (deterministic synthetic dataset).
+#
+# Triggered with `pull_request` (NOT pull_request_target): the workflow runs
+# in the PR merge-ref context with read-only permissions and executes only the
+# repository's own committed scripts — no PR-supplied content is trusted with
+# elevated access or secrets (none are used here at all).
+name: model-eval-gate
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  eval-gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Train model artifact (gitignored; required by the eval gates)
+        run: make train
+      - name: Run eval gates (accuracy + latency + regression)
+        run: make eval

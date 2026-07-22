@@ -167,6 +167,40 @@ kubectl --context "$K8S_CONTEXT" -n "$NAMESPACE" apply -f k8s/canary/canary-depl
 log "applying canary Ingress (${CANARY_INGRESS}, weight ${CANARY_WEIGHT_DEFAULT})"
 kubectl --context "$K8S_CONTEXT" -n "$NAMESPACE" apply -f k8s/canary/canary-ingress.yaml
 
+# The todo-30 health check reads candidate-vs-stable metrics from Prometheus,
+# discriminated by the model_version label. The base ServiceMonitor selects
+# services by `app.kubernetes.io/name: model-server` EXACTLY, which excludes the
+# canary service (model-server-canary) — so without this, the candidate emits
+# metrics that Prometheus never scrapes and every check would see an empty
+# candidate result. Apply a canary-scoped ServiceMonitor (runtime mutation, like
+# the set-env/annotate above; mirrors the base SM's port/path/interval and carries
+# the `release: kube-prometheus` label the Prometheus operator selects on). It is
+# inert once the canary service is gone after a rollback (no matching endpoints).
+log "applying canary ServiceMonitor (scrape candidate metrics into Prometheus)"
+kubectl --context "$K8S_CONTEXT" -n "$NAMESPACE" apply -f - <<EOF
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: ${CANARY_DEPLOY}
+  namespace: ${NAMESPACE}
+  labels:
+    release: kube-prometheus
+    app.kubernetes.io/name: ${CANARY_DEPLOY}
+    app.kubernetes.io/part-of: inferenceops
+    app.kubernetes.io/component: serving
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ${CANARY_DEPLOY}
+  namespaceSelector:
+    matchNames:
+      - ${NAMESPACE}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+EOF
+
 # --- 4. pin the candidate version + wait for rollout ------------------------
 # The manifest defaults MODEL_VERSION to the candidate; set env makes the
 # requested version authoritative (no-op when it already matches).
@@ -211,11 +245,80 @@ STABLE_BACKEND="$(kubectl --context "$K8S_CONTEXT" -n "$NAMESPACE" get ingress i
   || die "stable ingress backend is ${STABLE_BACKEND}, expected service-model-server"
 log "stable ingress (inferenceops) -> ${STABLE_BACKEND}"
 
+# --- 7. (todo 30) start the automated canary health-check loop --------------
+# Clear stale per-canary check state (stale_state guard): a fresh deploy resets
+# the consecutive-healthy counter, the promote-ready marker and the
+# Prometheus-down tracker so a re-deploy never inherits a previous canary's state.
+CANARY_LOOP_PIDFILE="${TMPDIR:-/tmp}/inferenceops-canary-check.pid"
+CANARY_READY_MARKER="${TMPDIR:-/tmp}/inferenceops-canary-promote-ready"
+CANARY_HEALTHY_COUNT_FILE="${TMPDIR:-/tmp}/inferenceops-canary-healthy-count"
+CANARY_DOWN_SINCE_FILE="${TMPDIR:-/tmp}/inferenceops-canary-prom-down-since"
+CANARY_CHECK_LOG="${TMPDIR:-/tmp}/inferenceops-canary-check.log"
+CANARY_CHECK_INTERVAL="${CANARY_CHECK_INTERVAL:-30}"
+
+rm -f "$CANARY_READY_MARKER" "$CANARY_HEALTHY_COUNT_FILE" "$CANARY_DOWN_SINCE_FILE"
+
+# Stop any pre-existing loop (idempotent re-deploy) before starting a new one.
+if [[ -f "$CANARY_LOOP_PIDFILE" ]]; then
+  OLD_LOOP_PID="$(cat "$CANARY_LOOP_PIDFILE" 2>/dev/null || true)"
+  if [[ -n "$OLD_LOOP_PID" ]] && kill -0 "$OLD_LOOP_PID" 2>/dev/null; then
+    log "stopping pre-existing canary check loop (pid ${OLD_LOOP_PID})"
+    kill -- "-${OLD_LOOP_PID}" 2>/dev/null || kill "$OLD_LOOP_PID" 2>/dev/null || true
+    sleep 1
+  fi
+  rm -f "$CANARY_LOOP_PIDFILE"
+fi
+
+log "starting automated canary health-check loop (every ${CANARY_CHECK_INTERVAL}s; log ${CANARY_CHECK_LOG})"
+# setsid -> the loop is its own session/process-group leader ($$ == PGID), so
+# promote.sh / rollback.sh can `kill -- -PID` the whole group (loop + in-flight
+# canary_check.sh + its port-forward) cleanly. The loop writes its own PID (the
+# group leader) to the pidfile. It TERMINATES on (a) the promote-ready marker,
+# (b) the pidfile being cleared (a check-triggered rollback cleared it), or
+# (c) the canary Ingress disappearing (external rollback/promote) — so it always
+# converges to a safe exit and never loops forever (Oracle F3).
+# shellcheck disable=SC2016  # inner single-quoted script: $$ / "$pidfile" expand in the loop's bash, not here
+setsid bash -c '
+  pidfile="$1"; marker="$2"; ctx="$3"; ns="$4"; canary_ingress="$5"; interval="$6"
+  echo $$ > "$pidfile"
+  while true; do
+    scripts/canary_check.sh || true
+    if [[ -f "$marker" ]]; then
+      echo "==> promote-ready marker present — check loop terminating (run: make promote)"
+      break
+    fi
+    if [[ ! -f "$pidfile" ]]; then
+      echo "==> loop pidfile cleared (rollback/promote in progress) — check loop terminating"
+      break
+    fi
+    if ! kubectl --context "$ctx" -n "$ns" get ingress "$canary_ingress" >/dev/null 2>&1; then
+      echo "==> canary Ingress gone — check loop terminating"
+      break
+    fi
+    sleep "$interval"
+  done
+  rm -f "$pidfile"
+' _ "$CANARY_LOOP_PIDFILE" "$CANARY_READY_MARKER" "$K8S_CONTEXT" "$NAMESPACE" "$CANARY_INGRESS" "$CANARY_CHECK_INTERVAL" >"$CANARY_CHECK_LOG" 2>&1 &
+
+# Wait briefly for the loop to record its group-leader PID.
+for _ in 1 2 3 4 5 6 7 8; do
+  [[ -s "$CANARY_LOOP_PIDFILE" ]] && break
+  sleep 0.5
+done
+LOOP_PID="$(cat "$CANARY_LOOP_PIDFILE" 2>/dev/null || true)"
+log "canary check loop started (pid ${LOOP_PID:-unknown}; tail -f ${CANARY_CHECK_LOG})"
+
 cat <<EOF
 
 Canary deployed (90/10 split at the model-server tier; gateway bypassed).
   stable  (90%): service-model-server         model_version=1.0.0
   canary  (10%): service-model-server-canary  model_version=${CANDIDATE_VERSION}
+
+  Automated health check (todo 30): running every ${CANARY_CHECK_INTERVAL}s
+  (log: ${CANARY_CHECK_LOG}, pid ${LOOP_PID:-unknown}). It auto-rolls-back on a
+  p95/error-rate/eval regression or Prometheus-down > ${PROM_DOWN_GRACE_SECONDS:-60}s,
+  and reports 'CANARY HEALTHY → promote-ready' after a clean window — it NEVER
+  auto-promotes. Promotion is deliberate: make promote (which stops the loop first).
 
   NOTE: the gateway (auth/rate-limit) is bypassed during the canary window, so
   /v1/predict needs NO X-API-Key right now. Send the Host header only:

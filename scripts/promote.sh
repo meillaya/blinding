@@ -28,6 +28,8 @@ CANARY_DEPLOY="model-server-canary"
 # Shared with deploy_canary.sh / canary_check.sh (todo 30).
 CANARY_LOOP_PIDFILE="${TMPDIR:-/tmp}/inferenceops-canary-check.pid"
 CANARY_READY_MARKER="${TMPDIR:-/tmp}/inferenceops-canary-promote-ready"
+CANARY_HEALTHY_COUNT_FILE="${TMPDIR:-/tmp}/inferenceops-canary-healthy-count"
+CANARY_DOWN_SINCE_FILE="${TMPDIR:-/tmp}/inferenceops-canary-prom-down-since"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
@@ -63,9 +65,12 @@ if [[ -f "$CANARY_LOOP_PIDFILE" ]]; then
   fi
   rm -f "$CANARY_LOOP_PIDFILE"
 else
-  log "no canary check loop running (todo 29 starts none) — nothing to stop"
+  log "no canary check loop running — nothing to stop"
 fi
-rm -f "$CANARY_READY_MARKER"
+# Clear ALL canary-check state (todo 30): the promote-ready marker, the
+# consecutive-healthy counter and the Prometheus-down tracker — so a subsequent
+# `make deploy-canary` starts its observation window from a clean slate.
+rm -f "$CANARY_READY_MARKER" "$CANARY_HEALTHY_COUNT_FILE" "$CANARY_DOWN_SINCE_FILE"
 
 # --- 2. shift the canary weight to 100 (100% candidate) ---------------------
 log "setting ${CANARY_INGRESS} canary-weight=100 (100% candidate)"

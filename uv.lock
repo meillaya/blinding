@@ -715,6 +715,7 @@ dependencies = [
     { name = "opentelemetry-sdk" },
     { name = "prometheus-client" },
     { name = "pydantic" },
+    { name = "pydantic-settings" },
     { name = "scikit-learn" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -730,6 +731,7 @@ requires-dist = [
     { name = "opentelemetry-sdk" },
     { name = "prometheus-client" },
     { name = "pydantic", specifier = ">=2" },
+    { name = "pydantic-settings", specifier = ">=2" },
     { name = "scikit-learn" },
     { name = "uvicorn", extras = ["standard"] },
 ]

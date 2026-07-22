@@ -1,0 +1,23 @@
+# Environment
+.env
+.venv/
+.devenv*/
+
+# Python
+__pycache__/
+*.pyc
+.coverage
+htmlcov/
+dist/
+
+# Terraform
+*.tfstate*
+.terraform/
+
+# Model artifacts (binary blobs, not their READMEs)
+models/artifacts/**/*.pkl
+
+# Tooling caches
+.codegraph
+.codegraph/
+.omx/

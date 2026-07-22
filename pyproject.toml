@@ -35,8 +35,7 @@ inferenceops-model-server = { workspace = true }
 inferenceops-worker = { workspace = true }
 
 [tool.pytest.ini_options]
-# todo 5 adds a root tests/ dir (smoke test + conftest); add "tests" here then.
-testpaths = ["apps"]
+testpaths = ["apps", "tests"]
 addopts = ["--strict-markers", "--cov"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
@@ -61,7 +60,12 @@ exclude_lines = [
 [tool.basedpyright]
 typeCheckingMode = "strict"
 pythonVersion = "3.12"
-include = ["apps"]
+include = ["apps", "tests"]
 exclude = ["**/__pycache__", "**/.venv", ".git", ".omo"]
+# Each app is a src-layout package (apps/<app>/src/<pkg>) that is run from
+# source (package = false), so it is never installed into the venv. List the
+# source roots here so absolute imports (import inferenceops_gateway, ...) and
+# intra-package imports resolve statically.
+extraPaths = ["apps/gateway/src", "apps/model-server/src", "apps/worker/src"]
 venvPath = "."
 venv = ".venv"

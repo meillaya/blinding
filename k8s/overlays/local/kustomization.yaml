@@ -22,7 +22,19 @@ namespace: inferenceops
 
 resources:
   - ../../base
+  # todo 20: let kube-prometheus-stack scrape model-server /metrics (feeds the
+  # custom-RPS external metric + the canary checks in todo 30). Requires the
+  # ServiceMonitor CRD, which exists once deploy_local.sh has installed
+  # kube-prometheus-stack (it does, before applying this overlay).
+  - servicemonitor-model-server.yaml
 
 patches:
   - path: patch-model-server.yaml
   - path: patch-gateway.yaml
+  # todo 20: append the custom-RPS external metric to the base cpu/memory HPA.
+  - path: patch-hpa-custom-rps.yaml
+
+# NOTE (todo 20): scaledobject-model-server.yaml lives in this dir but is NOT in
+# `resources` above, on purpose — it is the KEDA ALTERNATIVE to the HPA and must
+# never be applied alongside it (two scalers would fight). Apply it by hand only
+# after deleting the HPA; see the file header + docs/autoscaling-strategy.md.

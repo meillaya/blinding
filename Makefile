@@ -52,12 +52,12 @@ deploy-local: ## Deploy the full stack to a local kind cluster
 deploy-staging: ## Deploy the platform to the staging environment
 	scripts/deploy_staging.sh
 
-## Load testing (k6)
+## Load testing
 load-test-smoke: ## k6 smoke load test (minimal traffic, sanity)
 	k6 run load_tests/k6/smoke.js
 
-load-test-spike: ## k6 spike load test (sudden burst, exercises HPA scale-up)
-	k6 run load_tests/k6/spike.js
+load-test-spike: ## Spike load test — bounded curl burst that exercises HPA/KEDA scale-up (no k6 needed)
+	scripts/spike_load.sh
 
 load-test-soak: ## k6 soak load test (sustained traffic over time)
 	k6 run load_tests/k6/soak.js

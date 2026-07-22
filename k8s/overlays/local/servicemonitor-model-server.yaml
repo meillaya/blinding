@@ -1,0 +1,38 @@
+# ServiceMonitor for model-server (todo 20).
+#
+# Makes the kube-prometheus-stack Prometheus (installed by deploy_local.sh,
+# todo 19) scrape the model-server's /metrics so the prometheus-adapter
+# external-RPS rule (inferenceops_rps) and the canary checks (todo 30) have
+# data. The default kube-prometheus-stack Prometheus selects ServiceMonitors
+# in ANY namespace carrying the label `release: kube-prometheus` (its
+# serviceMonitorSelector is {matchLabels: {release: kube-prometheus}}), hence
+# that label below.
+#
+# The Service selects the model-server pods via app.kubernetes.io/name and
+# exposes the metrics on its `http` port (8080) at /metrics. interval: 15s
+# (tighter than the stack's 30s default) so rate(...[1m]) always has >=3
+# samples and the custom-RPS metric is stable instead of flapping to empty.
+#
+# NOTE: prometheus_client exposes the request Counter with the OpenMetrics
+# `_total` suffix, so the scraped series is `inferenceops_request_count_total`
+# (the docs' shorthand `inferenceops_request_count` is the same counter).
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: model-server
+  labels:
+    release: kube-prometheus
+    app.kubernetes.io/name: model-server
+    app.kubernetes.io/component: serving
+    app.kubernetes.io/part-of: inferenceops
+spec:
+  namespaceSelector:
+    matchNames:
+      - inferenceops
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: model-server
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s

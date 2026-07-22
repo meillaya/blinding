@@ -1,0 +1,57 @@
+# Strategic-merge patch (todo 20): add the custom-RPS external metric to the
+# base model-server HPA — ONE HPA with cpu + memory + external RPS (there is
+# deliberately NO second HPA on this Deployment).
+#
+# kustomize merges the HPA `metrics` list ATOMICALLY (its builtin OpenAPI has
+# no patchMergeKey for autoscaling/v2 metrics), so this patch RESTATES the full
+# list: the base cpu (70%) + memory (80%) entries verbatim, plus the new
+# External entry. Dropping the base entries here would silently remove them
+# from the live HPA — keep all three in sync with k8s/base/hpa.yaml.
+#
+# The metric `inferenceops_rps` is served by prometheus-adapter
+# (observability/prometheus-adapter/values.yaml) from the scraped
+# inferenceops_request_count_total counter. The HPA sums the adapter's per-pod
+# series (grouped by namespace,pod) to the deployment's total RPS and targets
+# ~30 RPS per replica (AverageValue), so a ~150+ RPS spike drives 2 -> 5+.
+#
+# Graceful degradation: if prometheus-adapter/Prometheus is unavailable this
+# metric reports `<unknown>` and the HPA keeps scaling on cpu/memory (the base
+# metrics) — see docs/autoscaling-strategy.md and /tmp/qa/t20_hpa_degraded.txt.
+#
+# behavior.scaleDown.stabilizationWindowSeconds: 60 (vs the 300s default) is a
+# KIND-LOCAL convenience so scale-down after a spike is observable in QA within
+# ~2min instead of ~5min; staging/prod keep the default conservative window.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: model-server
+spec:
+  metrics:
+    # --- base cpu/memory (verbatim from k8s/base/hpa.yaml) ---
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+    # --- todo 20: custom RPS via prometheus-adapter external metric ---
+    - type: External
+      external:
+        metric:
+          name: inferenceops_rps
+          # No label selector: the HPA already scopes the external metric to its
+          # own namespace (inferenceops), and only the model-server emits
+          # inferenceops_request_count_total, so the summed value is exactly the
+          # model-server deployment's total RPS.
+        target:
+          type: AverageValue
+          averageValue: "30"
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 60

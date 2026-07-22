@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Final
@@ -11,10 +12,15 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from inferenceops_model_server.errors import ModelNotFound
 from inferenceops_model_server.schemas import ModelInfo
-from inferenceops_model_server.storage.base import ModelStorage
+from inferenceops_model_server.storage.base import (
+    ARTIFACT_FILENAME,
+    META_FILENAME,
+    ModelStorage,
+    StorageError,
+    artifact_dirname,
+    upload_meta_bytes,
+)
 
-ARTIFACT_FILENAME: Final = "model.pkl"
-META_FILENAME: Final = "model_meta.json"
 MODELS_DIR_ENV_VAR: Final = "MODELS_DIR"
 
 # local.py -> storage -> inferenceops_model_server -> src -> model-server -> apps -> repo root
@@ -81,6 +87,34 @@ class LocalStorageBackend(ModelStorage):
             (info for info, _ in self._iter_artifacts()),
             key=lambda info: (info.model_id, info.version),
         )
+
+    def put_artifact(self, model_id: str, version: str, source: Path) -> str:
+        """Copy ``source``'s artifact into ``<root>/<dirname>/``; return its path.
+
+        The returned URI is the ``model.pkl`` path under the root; the stored
+        ``model_meta.json`` (synthesized when the source carries none) makes
+        the copy resolvable by ``get_artifact``/``list_models`` immediately.
+
+        Raises:
+            StorageError: when ``source`` has no ``model.pkl``, its metadata
+                disagrees with ``model_id``/``version``, or the copy fails.
+        """
+        artifact = source / ARTIFACT_FILENAME
+        if not artifact.is_file():
+            raise StorageError(
+                str(self._root), f"source directory {source} has no {ARTIFACT_FILENAME}"
+            )
+        meta_bytes = upload_meta_bytes(source, model_id, version)
+        target = self._root / artifact_dirname(model_id, version)
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(artifact, target / ARTIFACT_FILENAME)
+            (target / META_FILENAME).write_bytes(meta_bytes)
+        except OSError as exc:
+            raise StorageError(
+                str(self._root), f"upload of {model_id}@{version} to {target} failed: {exc}"
+            ) from exc
+        return str(target / ARTIFACT_FILENAME)
 
     def _iter_artifacts(self) -> Iterator[tuple[ModelInfo, Path]]:
         """Yield ``(info, directory)`` for each parseable artifact directory."""

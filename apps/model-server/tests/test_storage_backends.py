@@ -18,7 +18,7 @@ import threading
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final, Protocol
+from typing import Final, Protocol, TypedDict
 
 import boto3  # pyright: ignore[reportMissingTypeStubs]
 import pytest
@@ -40,8 +40,10 @@ from werkzeug.serving import make_server
 
 MODEL_V1: Final = ModelInfo(model_id="fraud-detector", version="1.0.0")
 MODEL_V2: Final = ModelInfo(model_id="fraud-detector", version="2.0.0")
+MODEL_V3: Final = ModelInfo(model_id="fraud-detector", version="3.0.0")
 BYTES_V1: Final = b"trained-classifier-bytes-v1\x00\x01"
 BYTES_V2: Final = b"trained-classifier-bytes-v2\x02\x03"
+BYTES_V3: Final = b"trained-classifier-bytes-v3\x04\x05"
 BUCKET: Final = "test-bucket"
 
 
@@ -56,6 +58,7 @@ class Seed:
 
 SEED_V1: Final = Seed("fraud_detector_v1", MODEL_V1, BYTES_V1)
 SEED_V2: Final = Seed("fraud_detector_v2", MODEL_V2, BYTES_V2)
+SEED_V3: Final = Seed("fraud_detector_v3", MODEL_V3, BYTES_V3)
 
 
 def _set_aws_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -68,11 +71,20 @@ def _set_aws_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(ENDPOINT_URL_ENV_VAR, raising=False)
 
 
+class _TestStreamingBody(Protocol):
+    def read(self) -> bytes: ...
+
+
+class _TestGetObjectResponse(TypedDict):
+    Body: _TestStreamingBody
+
+
 class _TestS3Client(Protocol):
     """The setup-only S3 surface tests use to stage buckets and objects."""
 
     def create_bucket(self, *, Bucket: str) -> object: ...
     def put_object(self, *, Bucket: str, Key: str, Body: bytes) -> object: ...
+    def get_object(self, *, Bucket: str, Key: str) -> _TestGetObjectResponse: ...
 
 
 def _raw_s3_client(endpoint_url: str | None = None) -> _TestS3Client:
@@ -104,6 +116,17 @@ def _seed_s3(bucket: str, seed: Seed, endpoint_url: str | None = None) -> None:
     client.put_object(
         Bucket=bucket, Key=f"{seed.dirname}/{ARTIFACT_FILENAME}", Body=seed.payload
     )
+
+
+def _write_source(base: Path, seed: Seed, *, with_meta: bool = True) -> Path:
+    """A source artifact directory for ``put_artifact`` (apart from any backend root)."""
+    source = base / "upload-source" / seed.dirname
+    source.mkdir(parents=True)
+    if with_meta:
+        meta = {"model_id": seed.info.model_id, "model_version": seed.info.version}
+        (source / META_FILENAME).write_text(json.dumps(meta), encoding="utf-8")
+    (source / ARTIFACT_FILENAME).write_bytes(seed.payload)
+    return source
 
 
 @pytest.fixture(params=["local", "s3"])
@@ -218,7 +241,7 @@ def test_s3_missing_bucket_raises_storage_error_on_get(s3_env: Path) -> None:
     backend = S3StorageBackend(bucket="wrong-bucket", cache_dir=s3_env)
     with pytest.raises(StorageError, match="wrong-bucket") as excinfo:
         backend.get_artifact(MODEL_V1.model_id, MODEL_V1.version)
-    assert excinfo.value.bucket == "wrong-bucket"
+    assert excinfo.value.location == "wrong-bucket"
 
 
 def test_s3_missing_bucket_raises_storage_error_on_list(s3_env: Path) -> None:
@@ -290,4 +313,110 @@ def test_s3_endpoint_defaults_to_none_and_round_trips(s3_env: Path) -> None:
     backend = S3StorageBackend(bucket=BUCKET, cache_dir=s3_env)
     assert backend.endpoint_url is None
     _seed_s3(BUCKET, SEED_V1)
+    assert backend.get_artifact(MODEL_V1.model_id, MODEL_V1.version).read_bytes() == BYTES_V1
+
+
+# --- put_artifact contract (Local real tempdir + S3 via moto) ----------------
+
+
+def test_put_artifact_round_trip_resolves_by_metadata(
+    seeded_storage: ModelStorage, tmp_path: Path
+) -> None:
+    source = _write_source(tmp_path, SEED_V3)
+    uri = seeded_storage.put_artifact(MODEL_V3.model_id, MODEL_V3.version, source)
+    assert uri.endswith(ARTIFACT_FILENAME)
+
+    artifact = seeded_storage.get_artifact(MODEL_V3.model_id, MODEL_V3.version)
+    assert artifact.read_bytes() == BYTES_V3
+    assert seeded_storage.list_models() == [MODEL_V1, MODEL_V2, MODEL_V3]
+
+
+def test_put_artifact_is_idempotent(seeded_storage: ModelStorage, tmp_path: Path) -> None:
+    source = _write_source(tmp_path, SEED_V3)
+    first = seeded_storage.put_artifact(MODEL_V3.model_id, MODEL_V3.version, source)
+    second = seeded_storage.put_artifact(MODEL_V3.model_id, MODEL_V3.version, source)
+    assert first == second
+    artifact = seeded_storage.get_artifact(MODEL_V3.model_id, MODEL_V3.version)
+    assert artifact.read_bytes() == BYTES_V3
+
+
+def test_put_artifact_source_without_meta_synthesizes_identity(
+    seeded_storage: ModelStorage, tmp_path: Path
+) -> None:
+    source = _write_source(tmp_path, SEED_V3, with_meta=False)
+    seeded_storage.put_artifact(MODEL_V3.model_id, MODEL_V3.version, source)
+    artifact = seeded_storage.get_artifact(MODEL_V3.model_id, MODEL_V3.version)
+    assert artifact.read_bytes() == BYTES_V3
+
+
+def test_put_artifact_meta_mismatch_raises_storage_error(
+    seeded_storage: ModelStorage, tmp_path: Path
+) -> None:
+    source = _write_source(tmp_path, SEED_V3)  # source meta records 3.0.0
+    with pytest.raises(StorageError, match="refusing to upload"):
+        seeded_storage.put_artifact(MODEL_V3.model_id, "9.9.9", source)
+
+
+def test_put_artifact_missing_artifact_raises_storage_error(
+    seeded_storage: ModelStorage, tmp_path: Path
+) -> None:
+    source = tmp_path / "empty-source"
+    source.mkdir()
+    with pytest.raises(StorageError, match="has no model.pkl"):
+        seeded_storage.put_artifact(MODEL_V3.model_id, MODEL_V3.version, source)
+
+
+# --- S3-specific: put_artifact URI shape, meta fidelity, prefix, errors -------
+
+
+def test_s3_put_artifact_returns_s3_uri_and_preserves_meta(
+    s3_env: Path, tmp_path: Path
+) -> None:
+    source = tmp_path / "src"
+    source.mkdir()
+    meta = {"model_id": "fraud-detector", "model_version": "3.0.0", "algorithm": "GBC"}
+    (source / META_FILENAME).write_text(json.dumps(meta), encoding="utf-8")
+    (source / ARTIFACT_FILENAME).write_bytes(BYTES_V3)
+    backend = S3StorageBackend(bucket=BUCKET, cache_dir=s3_env)
+
+    uri = backend.put_artifact("fraud-detector", "3.0.0", source)
+
+    assert uri == f"s3://{BUCKET}/fraud-detector-3.0.0/{ARTIFACT_FILENAME}"
+    # The source meta lands verbatim: provenance fields survive the upload.
+    response = _raw_s3_client().get_object(
+        Bucket=BUCKET, Key=f"fraud-detector-3.0.0/{META_FILENAME}"
+    )
+    assert json.loads(response["Body"].read()) == meta
+    assert backend.get_artifact("fraud-detector", "3.0.0").read_bytes() == BYTES_V3
+
+
+def test_s3_put_artifact_scopes_under_prefix(s3_env: Path, tmp_path: Path) -> None:
+    source = _write_source(tmp_path, SEED_V3)
+    backend = S3StorageBackend(bucket=BUCKET, prefix="prod", cache_dir=s3_env)
+    uri = backend.put_artifact(MODEL_V3.model_id, MODEL_V3.version, source)
+    assert uri == f"s3://{BUCKET}/prod/fraud-detector-3.0.0/{ARTIFACT_FILENAME}"
+    assert backend.get_artifact(MODEL_V3.model_id, MODEL_V3.version).read_bytes() == BYTES_V3
+
+
+def test_s3_put_artifact_missing_bucket_raises_storage_error(
+    s3_env: Path, tmp_path: Path
+) -> None:
+    source = _write_source(tmp_path, SEED_V3)
+    backend = S3StorageBackend(bucket="wrong-bucket", cache_dir=s3_env)
+    with pytest.raises(StorageError, match="wrong-bucket") as excinfo:
+        backend.put_artifact(MODEL_V3.model_id, MODEL_V3.version, source)
+    assert excinfo.value.location == "wrong-bucket"
+
+
+def test_s3_put_artifact_round_trips_via_injected_endpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, moto_server_endpoint: str
+) -> None:
+    monkeypatch.setenv(ENDPOINT_URL_ENV_VAR, moto_server_endpoint)
+    _raw_s3_client(moto_server_endpoint).create_bucket(Bucket=BUCKET)
+    source = _write_source(tmp_path, SEED_V1)
+    backend = S3StorageBackend(bucket=BUCKET, cache_dir=tmp_path / "cache")
+
+    uri = backend.put_artifact(MODEL_V1.model_id, MODEL_V1.version, source)
+
+    assert uri == f"s3://{BUCKET}/fraud-detector-1.0.0/{ARTIFACT_FILENAME}"
     assert backend.get_artifact(MODEL_V1.model_id, MODEL_V1.version).read_bytes() == BYTES_V1

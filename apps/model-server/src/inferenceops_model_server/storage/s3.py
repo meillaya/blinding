@@ -26,27 +26,29 @@ from pathlib import Path
 from typing import Final, Protocol, TypedDict
 
 import boto3  # pyright: ignore[reportMissingTypeStubs]  # boto3 ships no py.typed
+from boto3.exceptions import Boto3Error  # pyright: ignore[reportMissingTypeStubs]
 from botocore.exceptions import (  # pyright: ignore[reportMissingTypeStubs]
+    BotoCoreError,
     ClientError,
 )
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from inferenceops_model_server.errors import ModelNotFound
 from inferenceops_model_server.schemas import ModelInfo
-from inferenceops_model_server.storage.base import ModelStorage
+from inferenceops_model_server.storage.base import (
+    ModelStorage,
+    StorageError,
+    artifact_dirname,
+    upload_meta_bytes,
+)
 from inferenceops_model_server.storage.local import ARTIFACT_FILENAME, META_FILENAME
 
 ENDPOINT_URL_ENV_VAR: Final = "S3_ENDPOINT_URL"
 _DEFAULT_CACHE_DIR_NAME: Final = "inferenceops-model-cache"
 
-
-class StorageError(Exception):
-    """Raised when an S3 storage operation fails (missing bucket, failed download)."""
-
-    def __init__(self, bucket: str, reason: str) -> None:
-        self.bucket = bucket
-        self.reason = reason
-        super().__init__(f"S3 storage error on bucket {bucket!r}: {reason}")
+# StorageError moved to storage.base in todo 28 (the put_artifact contract is
+# shared by both backends); it stays importable from this module for callers.
+__all__ = ["ENDPOINT_URL_ENV_VAR", "S3StorageBackend", "StorageError"]
 
 
 class _ModelMeta(BaseModel):
@@ -93,6 +95,8 @@ class _S3Client(Protocol):
     ) -> _ListObjectsV2Response: ...
     def get_object(self, *, Bucket: str, Key: str) -> _GetObjectResponse: ...
     def download_file(self, *, Bucket: str, Key: str, Filename: str) -> None: ...
+    def upload_file(self, *, Filename: str, Bucket: str, Key: str) -> None: ...
+    def put_object(self, *, Bucket: str, Key: str, Body: bytes) -> object: ...
 
 
 def _build_client(endpoint_url: str | None) -> _S3Client:
@@ -203,6 +207,44 @@ class S3StorageBackend(ModelStorage):
             (info for info, _ in self._iter_artifacts(self._list_keys())),
             key=lambda info: (info.model_id, info.version),
         )
+
+    def put_artifact(self, model_id: str, version: str, source: Path) -> str:
+        """Upload ``source``'s artifact under the prefix; return the ``s3://`` URI.
+
+        Stores ``<prefix>/<dirname>/model.pkl`` and then its ``model_meta.json``:
+        the metadata publishes the artifact to the metadata-driven resolution,
+        so it lands last (a partial upload leaves the bytes invisible, never a
+        phantom model). Idempotent: S3 overwrites both objects.
+
+        Raises:
+            StorageError: when ``source`` has no ``model.pkl``, its metadata
+                disagrees with ``model_id``/``version``, or the upload fails
+                (missing bucket, absent credentials, unreachable endpoint).
+        """
+        artifact = source / ARTIFACT_FILENAME
+        if not artifact.is_file():
+            raise StorageError(
+                self._bucket, f"source directory {source} has no {ARTIFACT_FILENAME}"
+            )
+        meta_bytes = upload_meta_bytes(source, model_id, version)
+        dirname = artifact_dirname(model_id, version)
+        artifact_key = self._key(f"{dirname}/{ARTIFACT_FILENAME}")
+        try:
+            self._client.upload_file(
+                Filename=str(artifact), Bucket=self._bucket, Key=artifact_key
+            )
+            self._client.put_object(
+                Bucket=self._bucket,
+                Key=self._key(f"{dirname}/{META_FILENAME}"),
+                Body=meta_bytes,
+            )
+        except (Boto3Error, BotoCoreError, ClientError) as exc:
+            # Boto3Error: upload_file's transfer manager re-raises a failed
+            # PutObject as S3UploadFailedError, outside the botocore hierarchy.
+            raise StorageError(
+                self._bucket, f"upload of {model_id}@{version} failed: {exc}"
+            ) from exc
+        return f"s3://{self._bucket}/{artifact_key}"
 
     def _key(self, relative: str) -> str:
         """Full object key for a path relative to the prefix."""

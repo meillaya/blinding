@@ -110,6 +110,15 @@ class RegistryRecord(BaseModel):
         """A copy of this record promoted to ``target`` (all else unchanged)."""
         return self.model_copy(update={"status": target})
 
+    def with_approved_for_prod(self) -> Self:
+        """A copy of this record approved for prod (all else unchanged).
+
+        The ONLY path to ``approved_for_prod=True``: ``approve_model.py``,
+        which ``scripts/run_evals.sh`` calls after the three eval gates pass.
+        Register writes False; promote consumes it as the prod gate.
+        """
+        return self.model_copy(update={"approved_for_prod": True})
+
 
 class _MetricsFile(BaseModel):
     """A metrics JSON file: the three gate metrics; extra report fields ignored."""

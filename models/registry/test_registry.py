@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, Literal
 
+import approve_model
 import promote_model
 import pytest
 import register_model
@@ -117,6 +118,21 @@ def run_promote(env: Env, *, version: str = "1.0.0", to: str) -> int:
             version,
             "--to",
             to,
+            "--registry-file",
+            str(env.registry_file),
+            "--model-card-out",
+            str(env.card_out),
+        ]
+    )
+
+
+def run_approve(env: Env, *, version: str = "1.0.0") -> int:
+    return approve_model.main(
+        [
+            "--model-id",
+            "fraud-detector",
+            "--version",
+            version,
             "--registry-file",
             str(env.registry_file),
             "--model-card-out",
@@ -252,6 +268,70 @@ def test_promote_corrupt_registry_fails(env: Env, capsys: pytest.CaptureFixture[
     assert "corrupt" in capsys.readouterr().err
 
 
+# --- approve (eval-gate wiring, todo 28) ---------------------------------------
+
+
+def test_approve_flips_approved_for_prod(env: Env, capsys: pytest.CaptureFixture[str]) -> None:
+    assert run_register(env) == 0
+    assert read_entry(env)["approved_for_prod"] is False
+
+    capsys.readouterr()  # discard register's printed record; assert approve's below
+    assert run_approve(env) == 0
+
+    entry = read_entry(env)
+    assert entry["approved_for_prod"] is True
+    assert list(entry.keys()) == EXACT_SCHEMA_KEYS  # no field added or dropped
+    printed: dict[str, object] = json.loads(capsys.readouterr().out)
+    assert printed == entry
+
+
+def test_approve_is_idempotent(env: Env) -> None:
+    assert run_register(env) == 0
+    assert run_approve(env) == 0
+    first = env.registry_file.read_text()
+    assert run_approve(env) == 0
+    assert env.registry_file.read_text() == first
+
+
+def test_approve_unregistered_model_fails(env: Env, capsys: pytest.CaptureFixture[str]) -> None:
+    assert run_approve(env) == 1
+    assert "not registered" in capsys.readouterr().err
+    assert not env.registry_file.exists()  # nothing written on failure
+
+
+def test_approve_preserves_status_and_metrics(env: Env) -> None:
+    assert run_register(env) == 0
+    assert run_promote(env, to="staging") == 0
+    assert run_approve(env) == 0
+
+    entry = read_entry(env)
+    assert entry["approved_for_prod"] is True
+    assert entry["status"] == "staging"  # approval does not demote
+    assert entry["metrics"] == {"accuracy": 0.9655, "f1": 0.6102, "roc_auc": 0.9184}
+
+
+def test_promote_prod_succeeds_after_approve(env: Env) -> None:
+    """The full wiring: register -> eval-gate approval -> promote --to prod."""
+    assert run_register(env) == 0
+    assert run_promote(env, to="prod") == 1  # gate closed before approval
+
+    assert run_approve(env) == 0
+    assert run_promote(env, to="prod") == 0
+
+    entry = read_entry(env)
+    assert entry["status"] == "prod"
+    assert entry["approved_for_prod"] is True
+
+
+def test_approve_refills_model_card(env: Env) -> None:
+    assert run_register(env) == 0
+    assert "false" in env.card_out.read_text()  # approved_for_prod rendered false
+    assert run_approve(env) == 0
+    card = env.card_out.read_text()
+    assert "true" in card
+    assert "{{" not in card  # every placeholder replaced
+
+
 # --- decoupled versioning ------------------------------------------------------
 
 
@@ -297,3 +377,11 @@ def test_serialize_parse_round_trip_preserves_schema() -> None:
     assert reparsed == entries
     first = reparsed["fraud-detector@1.0.0"]
     assert list(first.to_json_dict().keys()) == EXACT_SCHEMA_KEYS
+
+
+def test_with_approved_for_prod_changes_only_the_approval() -> None:
+    record = _record(status="staging")
+    approved = record.with_approved_for_prod()
+    assert approved.approved_for_prod is True
+    assert approved == record.model_copy(update={"approved_for_prod": True})
+    assert record.approved_for_prod is False  # the source record is untouched

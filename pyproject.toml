@@ -64,7 +64,7 @@ exclude_lines = [
 [tool.basedpyright]
 typeCheckingMode = "strict"
 pythonVersion = "3.12"
-include = ["apps", "models", "tests"]
+include = ["apps", "models", "scripts", "tests"]
 exclude = ["**/__pycache__", "**/.venv", ".git", ".omo"]
 # Each app is a src-layout package (apps/<app>/src/<pkg>) that is run from
 # source (package = false), so it is never installed into the venv. List the

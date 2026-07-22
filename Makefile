@@ -13,7 +13,7 @@ IMAGE ?= inferenceops/model-server:dev
 # `make` with no arguments shows the help.
 .DEFAULT_GOAL := help
 
-.PHONY: help run-local test lint typecheck docker-build ci-local \
+.PHONY: help run-local test lint typecheck coverage-gate docker-build ci-local \
 	deploy-local deploy-staging \
 	load-test-smoke load-test-spike load-test-soak load-test-stress \
 	deploy-canary promote rollback \
@@ -35,6 +35,9 @@ lint: ## Lint the codebase with ruff
 
 typecheck: ## Type-check the codebase with basedpyright
 	uv run basedpyright
+
+coverage-gate: ## Enforce per-package coverage gates (model-server >=80%, gateway >=70%)
+	uv run python scripts/coverage_gate.py
 
 docker-build: ## Build the model-server container image (rootless docker)
 	docker build -t $(IMAGE) -f apps/model-server/Dockerfile .

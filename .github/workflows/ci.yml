@@ -1,10 +1,11 @@
 # InferenceOps CI — quality gates on every push and pull request.
 #
 # Jobs (each runs the matching Makefile target directly):
-#   lint         make lint          ruff
-#   typecheck    make typecheck     basedpyright (strict)
-#   test         make test          pytest + coverage
-#   docker-build make docker-build  model-server container image
+#   lint          make lint           ruff
+#   typecheck     make typecheck      basedpyright (strict)
+#   test          make test           pytest + coverage
+#   coverage      make coverage-gate  per-package coverage floors (model-server >=80%, gateway >=70%)
+#   docker-build  make docker-build   model-server container image
 #
 # Python is uv-managed: astral-sh/setup-uv installs uv + the pinned Python
 # interpreter and caches the uv download/cache directories. The docker-build
@@ -59,6 +60,19 @@ jobs:
         run: uv sync --locked
       - name: Test (pytest + coverage)
         run: make test
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Coverage gate (model-server >=80%, gateway >=70%)
+        run: make coverage-gate
 
   docker-build:
     runs-on: ubuntu-latest

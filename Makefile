@@ -1,0 +1,90 @@
+# InferenceOps — operator interface.
+#
+# Self-documenting: `make` (or `make help`) lists every target with its
+# description, parsed from the `## ` comments below.
+#
+# Docker/Kind run rootless on a user socket, so point DOCKER_HOST at it unless
+# the caller already exported one.
+export DOCKER_HOST ?= unix:///run/user/1000/docker-me.sock
+
+# Image tag used by the docker-build target (override with IMAGE=...).
+IMAGE ?= inferenceops/model-server:dev
+
+# `make` with no arguments shows the help.
+.DEFAULT_GOAL := help
+
+.PHONY: help run-local test lint typecheck docker-build ci-local \
+	deploy-local deploy-staging \
+	load-test-smoke load-test-spike load-test-soak load-test-stress \
+	deploy-canary promote rollback \
+	eval train llm-cpu-smoke canary-check batch
+
+help: ## Show available targets and their descriptions
+	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_-]+:.*## / {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+
+## Local development
+run-local: ## Run the model server locally on :8080 (uvicorn)
+	cd apps/model-server && uv run uvicorn server:app --host 0.0.0.0 --port 8080
+
+## Quality gates
+test: ## Run the test suite with pytest (with coverage)
+	uv run pytest
+
+lint: ## Lint the codebase with ruff
+	uv run ruff check .
+
+typecheck: ## Type-check the codebase with basedpyright
+	uv run basedpyright
+
+docker-build: ## Build the model-server container image (rootless docker)
+	docker build -t $(IMAGE) .
+
+ci-local: ## Run the full local CI pipeline (lint, typecheck, test, docker-build)
+	$(MAKE) lint typecheck test docker-build
+
+## Deployment
+deploy-local: ## Deploy the full stack to a local kind cluster
+	scripts/deploy_local.sh
+
+deploy-staging: ## Deploy the platform to the staging environment
+	scripts/deploy_staging.sh
+
+## Load testing (k6)
+load-test-smoke: ## k6 smoke load test (minimal traffic, sanity)
+	k6 run load_tests/k6/smoke.js
+
+load-test-spike: ## k6 spike load test (sudden burst, exercises HPA scale-up)
+	k6 run load_tests/k6/spike.js
+
+load-test-soak: ## k6 soak load test (sustained traffic over time)
+	k6 run load_tests/k6/soak.js
+
+load-test-stress: ## k6 stress load test (push past expected capacity)
+	k6 run load_tests/k6/stress.js
+
+## Canary / release lifecycle
+deploy-canary: ## Deploy a canary model version (usage: make deploy-canary MODEL_VERSION=v4)
+	scripts/deploy_canary.sh $(MODEL_VERSION)
+
+promote: ## Promote the canary to 100% (deliberate gated step)
+	scripts/promote.sh
+
+rollback: ## Roll back the canary to 0% (stable only)
+	scripts/rollback.sh
+
+canary-check: ## Run the automated canary health check (p95/errors/eval, fail-closed)
+	scripts/canary_check.sh
+
+## Modeling
+eval: ## Run all evaluation gates (accuracy, latency, regression)
+	scripts/run_evals.sh
+
+train: ## Train the fraud-detection model and write the artifact + metrics
+	uv run python models/training/train.py
+
+batch: ## Run a batch inference job
+	scripts/batch.sh
+
+## LLM
+llm-cpu-smoke: ## Smoke-test the small CPU LLM end-to-end via the gateway
+	scripts/llm_cpu_smoke.sh

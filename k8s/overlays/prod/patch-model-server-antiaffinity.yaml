@@ -1,0 +1,12 @@
+# JSON6902 patch (prod model-server). Replace the base's SOFT (preferred) pod
+# anti-affinity with a HARD (required) rule: model-server pods MUST land on
+# distinct hosts (topologyKey kubernetes.io/hostname). `replace` swaps the whole
+# podAntiAffinity object so the redundant preferred rule does not linger.
+- op: replace
+  path: /spec/template/spec/affinity/podAntiAffinity
+  value:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - topologyKey: kubernetes.io/hostname
+        labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: model-server

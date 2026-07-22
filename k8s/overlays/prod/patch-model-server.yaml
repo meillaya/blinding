@@ -1,0 +1,34 @@
+# prod model-server: 3 replicas, bumped resources, GPU-ready scheduling.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: model-server
+spec:
+  replicas: 3
+  template:
+    spec:
+      # GPU scheduling (matches the EKS GPU node-group taint, todo 23): pin
+      # model-server onto GPU nodes and tolerate their NoSchedule taint.
+      nodeSelector:
+        nvidia.com/gpu.present: "true"
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Equal
+          value: present
+          effect: NoSchedule
+      containers:
+        - name: model-server
+          imagePullPolicy: IfNotPresent
+          resources:
+            requests:
+              cpu: "4"
+              memory: "8Gi"
+              # nvidia.com/gpu: 1  # UNCOMMENT for GPU workloads (e.g. vLLM). The
+              #                    # default fraud model is CPU-only, so no GPU is
+              #                    # requested by default; the nodeSelector/toleration
+              #                    # above already make scheduling GPU-ready.
+            limits:
+              cpu: "8"
+              memory: "16Gi"
+              # nvidia.com/gpu: 1  # UNCOMMENT together with the request above
+              #                    # (the GPU request must equal the limit).

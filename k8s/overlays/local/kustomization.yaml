@@ -1,0 +1,28 @@
+# Local overlay (todo 18) — targets the kind cluster (todo 19).
+#
+# kind specifics:
+#   - imagePullPolicy: Never — images are `kind load docker-image`'d onto the
+#     nodes; there is NO registry to pull from, so Never avoids ErrImagePull.
+#   - image tag stays `dev` (the local build tag) — no `images:` transformer.
+#   - replicas: 2 for model-server (matches base; stated explicitly so the
+#     overlay is self-describing).
+#
+# Direct-access fallback (NO NodePort patch, by design): the kind cluster fronts
+# the gateway with the nginx ingress via extraPortMappings (8080:80 / 8443:443,
+# todo 19), so ingress is the primary path. kind does NOT publish 30000-range
+# NodePorts to localhost without additional extraPortMappings, so a NodePort
+# service patch would not enable `curl localhost:<nodePort>`. For ingress-less
+# direct access use:
+#     kubectl -n inferenceops port-forward svc/service-gateway 8080:8080
+# which works against the base ClusterIP service (no overlay patch required).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: inferenceops
+
+resources:
+  - ../../base
+
+patches:
+  - path: patch-model-server.yaml
+  - path: patch-gateway.yaml

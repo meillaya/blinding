@@ -1,0 +1,19 @@
+# prod gateway: modest resource bump + explicit pull policy. The gateway is
+# CPU-only (edge auth / rate-limit / proxy) — no GPU scheduling here.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+spec:
+  template:
+    spec:
+      containers:
+        - name: gateway
+          imagePullPolicy: IfNotPresent
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2"
+              memory: "1Gi"

@@ -37,7 +37,7 @@ typecheck: ## Type-check the codebase with basedpyright
 	uv run basedpyright
 
 docker-build: ## Build the model-server container image (rootless docker)
-	docker build -t $(IMAGE) .
+	docker build -t $(IMAGE) -f apps/model-server/Dockerfile .
 
 ci-local: ## Run the full local CI pipeline (lint, typecheck, test, docker-build)
 	$(MAKE) lint typecheck test docker-build

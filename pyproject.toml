@@ -1,0 +1,67 @@
+[project]
+name = "inferenceops"
+version = "0.1.0"
+description = "End-to-end MLOps platform for training, serving, and evaluating ML models."
+requires-python = ">=3.12"
+# Depend on the workspace members so a plain `uv sync` installs their runtime
+# dependencies (uv syncs only the root project by default, not all members).
+dependencies = [
+    "inferenceops-gateway",
+    "inferenceops-model-server",
+    "inferenceops-worker",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "pytest-asyncio",
+    "moto[s3,server]",
+    "ruff",
+    "basedpyright",
+]
+
+[tool.uv]
+# Virtual workspace root: not itself an installable package.
+package = false
+default-groups = ["dev"]
+
+[tool.uv.workspace]
+members = ["apps/*"]
+
+[tool.uv.sources]
+inferenceops-gateway = { workspace = true }
+inferenceops-model-server = { workspace = true }
+inferenceops-worker = { workspace = true }
+
+[tool.pytest.ini_options]
+# todo 5 adds a root tests/ dir (smoke test + conftest); add "tests" here then.
+testpaths = ["apps"]
+addopts = ["--strict-markers", "--cov"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.coverage.run]
+source = ["apps"]
+branch = true
+relative_files = true
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+precision = 1
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+    "\\.\\.\\.",
+]
+
+[tool.basedpyright]
+typeCheckingMode = "strict"
+pythonVersion = "3.12"
+include = ["apps"]
+exclude = ["**/__pycache__", "**/.venv", ".git", ".omo"]
+venvPath = "."
+venv = ".venv"

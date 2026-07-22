@@ -1,0 +1,22 @@
+[project]
+name = "inferenceops-gateway"
+version = "0.1.0"
+description = "InferenceOps API gateway: auth, rate limiting, routing to model servers."
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "pydantic>=2",
+    "scikit-learn",
+    "joblib",
+    "boto3",
+    "prometheus-client",
+    "opentelemetry-api",
+    "opentelemetry-sdk",
+    "opentelemetry-exporter-otlp",
+    "httpx",
+]
+
+[tool.uv]
+# Not installable until todo 5 adds the package skeleton; run from source for now.
+package = false

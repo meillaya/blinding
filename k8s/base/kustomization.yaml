@@ -25,3 +25,6 @@ resources:
   - deployment-gateway.yaml
   - service-model-server.yaml
   - service-gateway.yaml
+  - ingress.yaml
+  - hpa.yaml
+  - pdb.yaml

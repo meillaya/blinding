@@ -1,5 +1,6 @@
 # InferenceOps local-dev stack (todo 12): model-server + gateway + prometheus +
-# grafana, wired for the local observability story. Run rootless:
+# grafana + otel-collector (todo 34), wired for the local observability story.
+# Run rootless:
 #
 #   export DOCKER_HOST=unix:///run/user/1000/docker-me.sock
 #   docker compose up -d --build
@@ -16,6 +17,8 @@ services:
       context: .
       dockerfile: apps/model-server/Dockerfile
     image: inferenceops/model-server:dev
+    environment:
+      OTEL_ENDPOINT: http://otel-collector:4318
     # Internal only: the gateway proxies to http://model-server:8080 over the
     # compose network; no host port is published.
     expose:
@@ -32,6 +35,7 @@ services:
       MODEL_SERVER_URL: http://model-server:8080
       API_KEYS: test-key
       RATE_LIMIT_RPS: "100"
+      OTEL_ENDPOINT: http://otel-collector:4318
     ports:
       - "8080:8080"
     # Wait until the model server passes its healthcheck before starting, so the
@@ -40,6 +44,17 @@ services:
       model-server:
         condition: service_healthy
     # Image-level HEALTHCHECK (/healthz) drives the healthy state.
+
+  otel-collector:
+    image: otel/opentelemetry-collector:0.102.1
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./observability/opentelemetry/collector.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "4317:4317" # OTLP gRPC
+      - "4318:4318" # OTLP HTTP (gateway + model-server export here)
+      - "8888:8888" # internal metrics (otelcol_receiver_accepted_spans)
+      - "8889:8889" # prometheus exporter (OTLP metrics re-exposed)
 
   prometheus:
     image: prom/prometheus

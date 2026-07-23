@@ -1,7 +1,7 @@
 # Non-secret runtime config (todo 16). Shared by both apps; each Deployment
-# pulls only the keys it reads (model-server: MODEL_ID/MODEL_VERSION/LOG_LEVEL;
-# gateway: RATE_LIMIT_RPS/LOG_LEVEL). Secrets (API keys) live in the Secret,
-# NOT here.
+# pulls only the keys it reads (model-server: MODEL_ID/MODEL_VERSION/LOG_LEVEL/
+# OTEL_ENDPOINT; gateway: RATE_LIMIT_RPS/LOG_LEVEL/OTEL_ENDPOINT). Secrets
+# (API keys) live in the Secret, NOT here.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -18,3 +18,6 @@ data:
   RATE_LIMIT_RPS: "100"
   # Shared log verbosity (uvicorn/python). Informational, non-secret.
   LOG_LEVEL: "info"
+  # OTLP/HTTP export target (todo 34): the in-cluster OpenTelemetry collector.
+  # Both apps' telemetry attaches OTLP exporters iff this is set.
+  OTEL_ENDPOINT: "http://otel-collector:4318"

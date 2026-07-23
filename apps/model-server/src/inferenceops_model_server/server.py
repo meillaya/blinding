@@ -53,12 +53,15 @@ from inferenceops_model_server.schemas import (
 )
 from inferenceops_model_server.storage.base import ModelStorage
 from inferenceops_model_server.storage.local import LocalStorageBackend
+from inferenceops_model_server.telemetry import Telemetry, TelemetryMiddleware, init_telemetry
 
 DEFAULT_MODEL_ID: Final = "fraud-detector"
 DEFAULT_MODEL_VERSION: Final = "1.0.0"
 DEFAULT_PREDICT_TIMEOUT_S: Final = 5.0
 MODEL_ID_ENV_VAR: Final = "MODEL_ID"
 MODEL_VERSION_ENV_VAR: Final = "MODEL_VERSION"
+OTEL_ENDPOINT_ENV_VAR: Final = "OTEL_ENDPOINT"
+SERVICE_NAME: Final = "inferenceops-model-server"
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +73,7 @@ class ServerConfig:
     batch_config: BatchConfig = field(default_factory=BatchConfig)
     predict_timeout_s: float = DEFAULT_PREDICT_TIMEOUT_S
     storage: ModelStorage | None = None  # None -> LocalStorageBackend()
+    otel_endpoint: str | None = None  # None -> exporter-free tracer provider
 
 
 @dataclass(slots=True)
@@ -89,6 +93,7 @@ def _config_from_env() -> ServerConfig:
     return ServerConfig(
         model_id=os.environ.get(MODEL_ID_ENV_VAR, DEFAULT_MODEL_ID),
         model_version=os.environ.get(MODEL_VERSION_ENV_VAR, DEFAULT_MODEL_VERSION),
+        otel_endpoint=os.environ.get(OTEL_ENDPOINT_ENV_VAR),
     )
 
 
@@ -151,9 +156,18 @@ def _install_shutdown_handler(state: ServerState) -> None:
     asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, _request_shutdown, state)
 
 
-def create_app(config: ServerConfig | None = None) -> FastAPI:
-    """Construct the model-server FastAPI application."""
+def create_app(
+    config: ServerConfig | None = None,
+    *,
+    telemetry: Telemetry | None = None,
+) -> FastAPI:
+    """Construct the model-server FastAPI application.
+
+    ``telemetry`` is an injection seam: tests pass an in-memory-span provider;
+    production leaves it None (OTLP export iff ``OTEL_ENDPOINT`` is configured).
+    """
     cfg = config if config is not None else _config_from_env()
+    tel = telemetry if telemetry is not None else init_telemetry(SERVICE_NAME, cfg.otel_endpoint)
     state = ServerState(
         storage=cfg.storage if cfg.storage is not None else LocalStorageBackend(),
         metrics=MetricsRegistry(),
@@ -252,6 +266,7 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
     )
     app.add_api_route("/v1/batch", batch_endpoint, methods=["POST"], response_model=BatchResponse)
 
+    app.add_middleware(TelemetryMiddleware, telemetry=tel)
     return app
 
 

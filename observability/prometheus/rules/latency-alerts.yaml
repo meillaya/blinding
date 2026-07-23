@@ -1,0 +1,30 @@
+# PrometheusRule: inference latency alerts (todo 32).
+#
+# HighP95Latency fires when the 95th-percentile end-to-end request latency
+# (across all model versions) exceeds 500 ms for 2 consecutive minutes.
+# The metric is the histogram exported by the model server (todo 8):
+#   inferenceops_request_duration_seconds_bucket  (label: model_version)
+#
+# Applied via additionalPrometheusRulesMap in observability/prometheus/values.yaml;
+# this standalone file is the authoritative reference (same groups, PrometheusRule CR
+# shape for direct `kubectl apply` if ever needed outside Helm).
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: inferenceops-latency-alerts
+  labels:
+    app.kubernetes.io/part-of: inferenceops
+    app.kubernetes.io/component: observability
+spec:
+  groups:
+    - name: inferenceops.latency
+      rules:
+        - alert: HighP95Latency
+          expr: histogram_quantile(0.95, sum(rate(inferenceops_request_duration_seconds_bucket[5m])) by (le)) > 0.5
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "P95 inference latency above 500 ms"
+            description: "P95 request duration is {{ $value | humanizeDuration }} (threshold 500 ms) for the last 2 minutes."

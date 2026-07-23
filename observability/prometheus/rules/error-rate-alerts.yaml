@@ -1,0 +1,39 @@
+# PrometheusRule: inference error-rate alerts (todo 32).
+#
+# HighErrorRate fires when the ratio of failed requests to total requests
+# exceeds 1 % for 2 consecutive minutes (severity: critical).
+# Metrics (todo 8, stored with the _total suffix by prometheus_client):
+#   inferenceops_error_count_total    (label: model_version)
+#   inferenceops_request_count_total  (labels: method, status, model_version)
+#
+# The ratio is computed across all model versions and methods. A guard
+# (denominator > 0) is implicit: rate() of a counter with no samples yields
+# no series, so the division produces no result and the alert stays silent
+# when there is no traffic.
+#
+# Applied via additionalPrometheusRulesMap in observability/prometheus/values.yaml.
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: inferenceops-error-rate-alerts
+  labels:
+    app.kubernetes.io/part-of: inferenceops
+    app.kubernetes.io/component: observability
+spec:
+  groups:
+    - name: inferenceops.error-rate
+      rules:
+        - alert: HighErrorRate
+          expr: |
+            (
+              sum(rate(inferenceops_error_count_total[5m]))
+              /
+              sum(rate(inferenceops_request_count_total[5m]))
+            ) > 0.01
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Inference error rate above 1 %"
+            description: "Error rate is {{ $value | humanizePercentage }} (threshold 1 %) for the last 2 minutes."

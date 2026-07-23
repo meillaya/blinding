@@ -251,3 +251,47 @@
   `serviceMonitorSelectorNilUsesHelmValues: true` (chart default, made explicit
   in values.yaml), the Prometheus CR selects them. No `serviceMonitorSelector: {}`
   override needed.
+
+## todo 36 (incident runbook + sample postmortem + SLI/SLO) — 2026-07-22
+
+- **The four alert names are the cross-check contract:** `HighP95Latency`
+  (warning, latency-alerts.yaml), `HighErrorRate` (critical,
+  error-rate-alerts.yaml), `HighGpuUtilization` + `HighGpuMemoryUsage` (both
+  info, gpu-alerts.yaml). `check_runbook_coverage.sh` awk-parses them from
+  `rules/*.yaml` (line shape `  - alert: Name`) and greps the runbook for a
+  `### <name>` heading; exit 0 covered / 1 missing (names on stderr) / 2 env
+  error (missing dir/runbook/rule files, or zero names parsed) so a broken
+  check never passes silently.
+- **Grep boundary class for alert-name headings:** the runbook headings carry
+  a colon suffix (`### HighP95Latency: P95 inference latency above 500 ms`),
+  so the match pattern needs `([^A-Za-z0-9_]|$)` after the name, NOT
+  `([[:space:]]|$)`. The whitespace-only boundary made the first QA run fail
+  4/4. The identifier-char boundary also keeps the invariant that a prefix
+  never matches (HighP95 must not satisfy HighP95Latency).
+- **shellcheck SC2016 fires on literal backtick/`###` text in single-quoted
+  printf strings** (it thinks you forgot expansion). Disable inline with a
+  reason (`# shellcheck disable=SC2016  # literal ... marker`), same
+  convention as canary_check.sh's SC2329 disables.
+- **SLOs reuse the alert expressions verbatim** so alert and SLO can never
+  disagree on the number: latency SLO = the HighP95Latency expr `< 0.5` per
+  5m window (99.5% of windows, 30d rolling); error SLO = the HighErrorRate
+  ratio `< 0.01`; throughput SLO = `sum(rate(inferenceops_request_count_total[5m]))`
+  >= 50 rps while the other two hold (no alert; capacity tested offline by k6,
+  todo 37); GPU SLO = `avg(DCGM_FI_DEV_GPU_UTIL) < 90` (series absent on the
+  CPU-only kind node, so the info alerts never fire there). 99.5% over 30d =
+  ~216 min error budget (~7 min/day).
+- **Counters render with the `_total` suffix** (prometheus_client): metrics.py
+  names them `inferenceops_request_count` / `inferenceops_error_count`, but
+  every PromQL (alerts, SLOs, runbook) must use
+  `inferenceops_request_count_total` / `inferenceops_error_count_total`, the
+  stored series names.
+- **Sample-postmortem scenario is grounded in the real gates:** the eval gate
+  checks accuracy/f1 ONLY (no latency gate), and canary_check.sh rolls back on
+  candidate p95 > stable x 1.20 in the first measurable 30s iteration, BEFORE
+  the global HighP95Latency alert completes its 2m `for` window. The postmortem
+  timeline reflects that ordering (auto-rollback 14:06, alert fires 14:07,
+  page arrives for an already-resolved incident, which becomes action item 4).
+- **QA failure path = a NEW temp rule file, never an edit of the real rules:**
+  `rules/zz-temp-qa.yaml` with `alert: TempQaAlertNoRunbook` + `vector(1) > 0`,
+  run the check (exit 1, names it), `rm` the file, re-run (exit 0). The three
+  real rule files are untouched.

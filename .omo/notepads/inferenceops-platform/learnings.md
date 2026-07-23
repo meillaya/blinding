@@ -295,3 +295,44 @@
   `rules/zz-temp-qa.yaml` with `alert: TempQaAlertNoRunbook` + `vector(1) > 0`,
   run the check (exit 1, names it), `rm` the file, re-run (exit 0). The three
   real rule files are untouched.
+
+## todo 37 (k6 smoke + stress + run_load_test.sh) — 2026-07-22
+
+- **k6 is a devenv package, NOT on the default PATH.** Locate it with
+  `find /nix/store -maxdepth 3 -name k6 -type f -path '*/bin/*' | head -1`
+  (survives nix GC) and prepend its dir to PATH, or run inside `devenv shell`.
+  `scripts/run_load_test.sh` guards with `command -v k6` and exits 2 with a
+  hint if absent — so `make load-test-smoke` fails loudly outside devenv rather
+  than running a half-test. k6 here is v0.57.0.
+- **`k6 --out json=<file>` writes a NEWLINE-DELIMITED JSON STREAM, not one
+  summary object** — first a `{"type":"Metric",...}` line per metric, then one
+  `{"type":"Point",...}` line PER SAMPLE (with `tags`, incl. the `--tag
+  scenario=<name>` added by the wrapper). todo 40's benchmark parser must read
+  it line-by-line (jq -c / a streaming JSON parser), NOT `JSON.parse(wholeFile)`.
+- **The raw JSON stream is LARGE under stress:** ~300k iterations (90s @ ~3354
+  RPS) produced a 1.1 GB / 4.2M-line `k6-stress.json`. smoke (30s, 2 VUs, ~37
+  RPS) is ~1.4 MB. These are untracked generated artifacts (left for todo 40);
+  do NOT `git add -A` them — stage only the source files.
+- **k6 lets you override the `Host` header** via the request `headers` map
+  (`Host: inferenceops.local`) — required to route through the nginx ingress to
+  the gateway on `localhost:8080`. Pair it with `X-API-Key:
+  dev-key-REPLACE-ME-0000000000000000` (the base path needs the key; `/healthz`
+  is open). Predict body = 20 floats.
+- **Live-cluster baselines:** smoke @ 2 VUs ≈ 37 RPS, p95 ≈ 55 ms, 0% errors
+  (threshold p95<500 passes with ~10× headroom). stress ramping 0→80 VUs hit
+  ~3354 max-RPS with a 94.47% error rate (gateway/model-server shed load — the
+  intended stress signal). The HPA scaled model-server 2→7 (NOT pinned at max 10)
+  and auto-recovered toward min 2 within the stabilization window after traffic
+  stopped; host memory held ~34-35 Gi available, D-state 0 throughout (no
+  swap-thrash repeat). Load is bounded by design (stress ends at 0 VUs).
+- **`DURATION` applies to smoke only (constant-vus `duration`); stress uses
+  fixed bounded ramp stages and ignores it on purpose** (cluster safety). The
+  wrapper still passes `DURATION` via `-e` to every script; stress.js just
+  doesn't read it. Override the stress peak with `MAX_VUS` (default 80).
+- **QA failure path = closed port, not a slow endpoint.** `TARGET=http://localhost:1`
+  → connection-refused → `http_req_failed` 100% → thresholds (`checks`,
+  `http_req_failed`) crossed → k6 exits 99 → `make` reports `Error 99` and exits
+  2 (non-zero). The smoke check uses a SHORT-CIRCUIT guard
+  (`r.status === 200 && r.json('prediction') !== undefined`) so the empty body of
+  a failed request never throws inside the VU — the failure surfaces as a clean
+  check/threshold fail, not a script exception.

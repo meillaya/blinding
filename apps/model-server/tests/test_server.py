@@ -86,6 +86,14 @@ def _features(value: float = 0.1, count: int = FEATURE_COUNT) -> list[float]:
     return [value] * count
 
 
+def _sample(text: str, prefix: str) -> float:
+    """Value of the first sample line starting with ``prefix``."""
+    for line in text.splitlines():
+        if line.startswith(prefix):
+            return float(line.rsplit(" ", maxsplit=1)[1])
+    raise AssertionError(f"no sample line starting with {prefix!r}")
+
+
 def _free_port() -> int:
     """Bind an ephemeral port and return its number."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
@@ -183,6 +191,32 @@ def test_predict_records_request_duration_load_and_batch_metrics(client: TestCli
     assert 'inferenceops_request_duration_seconds_count{model_version="1.0.0"} 1.0' in text
     assert 'inferenceops_model_load_seconds_count{model_version="1.0.0"} 1.0' in text
     assert 'inferenceops_batch_size_bucket{le="1.0",model_version="1.0.0"} 1.0' in text
+
+
+def test_predict_populates_prediction_and_confidence_histograms(client: TestClient) -> None:
+    response = _post_json(client, "/v1/predict", {"features": _features()})
+    body = PredictResponse.model_validate(response.json())
+    text = _get(client, "/metrics").text
+    assert 'inferenceops_prediction_distribution_count{model_version="1.0.0"} 1.0' in text
+    assert 'inferenceops_confidence_distribution_count{model_version="1.0.0"} 1.0' in text
+    assert (
+        'inferenceops_confidence_distribution_bucket{le="1.0",model_version="1.0.0"} 1.0' in text
+    )
+    label_zero_count = _sample(
+        text, 'inferenceops_prediction_distribution_bucket{le="0.5",model_version="1.0.0"} '
+    )
+    assert label_zero_count == (1.0 if body.prediction == 0 else 0.0)
+
+
+def test_model_info_reflects_loaded_model(client: TestClient) -> None:
+    text = _get(client, "/metrics").text
+    assert 'inferenceops_model_info{model_id="fraud-detector",version="1.0.0"} 1.0' in text
+
+
+def test_model_info_absent_when_model_missing(tmp_path: Path) -> None:
+    config = ServerConfig(storage=LocalStorageBackend(tmp_path))
+    with TestClient(create_app(config)) as client:
+        assert "inferenceops_model_info{" not in _get(client, "/metrics").text
 
 
 def test_models_lists_fraud_detector(client: TestClient) -> None:

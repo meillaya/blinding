@@ -1,4 +1,4 @@
-"""MetricsRegistry tests: all 5 metrics render with the model_version label.
+"""MetricsRegistry tests: all 9 metrics render with their label sets.
 
 Asserts on the REAL Prometheus text exposition format (``generate_latest``
 output), never on prose: exact sample lines with their label sets and values.
@@ -14,7 +14,15 @@ from typing import Final
 
 import pytest
 from inferenceops_model_server import model_loader
-from inferenceops_model_server.metrics import METRIC_NAMES, MetricsRegistry
+from inferenceops_model_server.metrics import (
+    BATCH_SIZE,
+    ERROR_COUNT,
+    METRIC_NAMES,
+    MODEL_LOAD_SECONDS,
+    REQUEST_COUNT,
+    REQUEST_DURATION_SECONDS,
+    MetricsRegistry,
+)
 from inferenceops_model_server.storage.local import LocalStorageBackend
 from prometheus_client import CollectorRegistry
 
@@ -39,17 +47,27 @@ def _sample(text: str, prefix: str) -> float:
     raise AssertionError(f"no sample line starting with {prefix!r}")
 
 
-def test_all_five_metrics_render_with_model_version_label() -> None:
+def test_all_nine_metrics_render() -> None:
     registry = MetricsRegistry()
     registry.observe_request("predict", "200", MODEL_VERSION)
     registry.observe_duration(MODEL_VERSION, 0.012)
     registry.observe_error(MODEL_VERSION)
     registry.observe_batch_size(MODEL_VERSION, 4)
     registry.observe_model_load(MODEL_VERSION, 0.35)
+    registry.observe_prediction(MODEL_VERSION, 1, 0.97)
+    registry.set_model_info(MODEL_ID, MODEL_VERSION)
+    registry.set_drift_score(0.42)
 
     text = registry.render()
     for name in METRIC_NAMES:
         assert f"# TYPE {name}" in text
+    for name in (
+        REQUEST_COUNT,
+        REQUEST_DURATION_SECONDS,
+        ERROR_COUNT,
+        MODEL_LOAD_SECONDS,
+        BATCH_SIZE,
+    ):
         labeled = [
             line
             for line in text.splitlines()
@@ -66,6 +84,50 @@ def test_all_five_metrics_render_with_model_version_label() -> None:
     assert 'inferenceops_error_count_total{model_version="1.0.0"} 1.0' in text
     assert 'inferenceops_model_load_seconds_count{model_version="1.0.0"} 1.0' in text
     assert 'inferenceops_batch_size_bucket{le="4.0",model_version="1.0.0"} 1.0' in text
+    assert (
+        'inferenceops_prediction_distribution_bucket{le="1.0",model_version="1.0.0"} 1.0' in text
+    )
+    assert (
+        'inferenceops_confidence_distribution_bucket{le="0.99",model_version="1.0.0"} 1.0' in text
+    )
+    assert 'inferenceops_model_info{model_id="fraud-detector",version="1.0.0"} 1.0' in text
+    assert "inferenceops_drift_score 0.42" in text
+
+
+def test_observe_prediction_populates_label_and_confidence_histograms() -> None:
+    registry = MetricsRegistry()
+    registry.observe_prediction(MODEL_VERSION, 0, 0.03)
+    registry.observe_prediction(MODEL_VERSION, 1, 0.97)
+    text = registry.render()
+    assert 'inferenceops_prediction_distribution_bucket{le="0.5",model_version="1.0.0"} 1.0' in text
+    assert 'inferenceops_prediction_distribution_bucket{le="1.0",model_version="1.0.0"} 2.0' in text
+    assert 'inferenceops_prediction_distribution_count{model_version="1.0.0"} 2.0' in text
+    assert (
+        'inferenceops_confidence_distribution_bucket{le="0.05",model_version="1.0.0"} 1.0' in text
+    )
+    assert (
+        'inferenceops_confidence_distribution_bucket{le="0.95",model_version="1.0.0"} 1.0' in text
+    )
+    assert (
+        'inferenceops_confidence_distribution_bucket{le="0.99",model_version="1.0.0"} 2.0' in text
+    )
+    assert 'inferenceops_confidence_distribution_count{model_version="1.0.0"} 2.0' in text
+
+
+def test_set_model_info_marks_loaded_model_identity() -> None:
+    registry = MetricsRegistry()
+    registry.set_model_info(MODEL_ID, MODEL_VERSION)
+    text = registry.render()
+    assert "# TYPE inferenceops_model_info gauge" in text
+    assert 'inferenceops_model_info{model_id="fraud-detector",version="1.0.0"} 1.0' in text
+
+
+def test_set_drift_score_publishes_unlabeled_gauge() -> None:
+    registry = MetricsRegistry()
+    registry.set_drift_score(0.42)
+    text = registry.render()
+    assert "# TYPE inferenceops_drift_score gauge" in text
+    assert "inferenceops_drift_score 0.42" in text
 
 
 def test_accepts_caller_supplied_registry() -> None:

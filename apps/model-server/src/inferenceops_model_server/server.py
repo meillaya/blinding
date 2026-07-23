@@ -170,10 +170,16 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
             model = None  # stay alive but NOT ready: /readyz 503, predict/batch 404
         if model is not None:
             state.metrics.record_model_load(cfg.model_id, cfg.model_version)
+            state.metrics.set_model_info(cfg.model_id, cfg.model_version)
 
             def infer(rows: list[list[float]]) -> list[Prediction]:
                 state.metrics.observe_batch_size(cfg.model_version, len(rows))
-                return [predictor.predict(model, row) for row in rows]
+                predictions = [predictor.predict(model, row) for row in rows]
+                for prediction in predictions:
+                    state.metrics.observe_prediction(
+                        cfg.model_version, prediction.label, prediction.score
+                    )
+                return predictions
 
             state.batcher = DynamicBatcher(cfg.batch_config, infer)
             state.ready = True

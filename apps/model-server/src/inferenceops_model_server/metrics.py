@@ -1,8 +1,8 @@
 """Prometheus metrics registry for the model server.
 
-Every metric carries a ``model_version`` label set from the loaded model at
-request time — the discriminator the canary rollback (todo 30) uses to compare
-candidate vs stable. Each ``MetricsRegistry`` owns a DEDICATED
+Every request-path metric carries a ``model_version`` label set from the loaded
+model at request time — the discriminator the canary rollback (todo 30) uses to
+compare candidate vs stable. Each ``MetricsRegistry`` owns a DEDICATED
 ``CollectorRegistry`` (never the process-global default), so instances never
 leak state into one another: tests construct one per test.
 
@@ -11,6 +11,14 @@ each handler: it times the request, records the duration, counts it under its
 final HTTP ``status`` (the handler sets ``state.status`` — e.g. ``"504`` on a
 handled ``BatchTimeout`` — and calls ``observe_error`` for failures), and, if
 an exception escapes the block, forces status ``"500"`` and counts the error.
+
+ML metrics (spec §M7, todo 35): ``observe_prediction`` records each served
+prediction's label (``inferenceops_prediction_distribution``) and positive-class
+confidence (``inferenceops_confidence_distribution``); ``set_model_info`` marks
+the loaded model identity (``inferenceops_model_info``, labels ``model_id`` /
+``version``); ``set_drift_score`` publishes the latest drift score computed by
+the worker's offline ``drift_job`` (``inferenceops_drift_score``, unlabeled —
+the alert threshold is global).
 """
 
 from __future__ import annotations
@@ -25,6 +33,7 @@ from prometheus_client import (
     CONTENT_TYPE_LATEST,
     CollectorRegistry,
     Counter,
+    Gauge,
     Histogram,
     generate_latest,
 )
@@ -36,6 +45,10 @@ REQUEST_DURATION_SECONDS: Final = "inferenceops_request_duration_seconds"
 ERROR_COUNT: Final = "inferenceops_error_count"
 MODEL_LOAD_SECONDS: Final = "inferenceops_model_load_seconds"
 BATCH_SIZE: Final = "inferenceops_batch_size"
+PREDICTION_DISTRIBUTION: Final = "inferenceops_prediction_distribution"
+CONFIDENCE_DISTRIBUTION: Final = "inferenceops_confidence_distribution"
+MODEL_INFO: Final = "inferenceops_model_info"
+DRIFT_SCORE: Final = "inferenceops_drift_score"
 
 METRIC_NAMES: Final[tuple[str, ...]] = (
     REQUEST_COUNT,
@@ -43,6 +56,10 @@ METRIC_NAMES: Final[tuple[str, ...]] = (
     ERROR_COUNT,
     MODEL_LOAD_SECONDS,
     BATCH_SIZE,
+    PREDICTION_DISTRIBUTION,
+    CONFIDENCE_DISTRIBUTION,
+    MODEL_INFO,
+    DRIFT_SCORE,
 )
 
 _DURATION_BUCKETS: Final[tuple[float, ...]] = (
@@ -50,6 +67,11 @@ _DURATION_BUCKETS: Final[tuple[float, ...]] = (
 )
 _LOAD_BUCKETS: Final[tuple[float, ...]] = (0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0)
 _BATCH_BUCKETS: Final[tuple[float, ...]] = (1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0)
+# Binary labels split at 0.5: le="0.5" counts label 0, le="1.0" counts both.
+_PREDICTION_BUCKETS: Final[tuple[float, ...]] = (0.5, 1.0)
+_CONFIDENCE_BUCKETS: Final[tuple[float, ...]] = (
+    0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99, 1.0,
+)
 
 
 @dataclass(slots=True)
@@ -132,6 +154,31 @@ class MetricsRegistry:
             registry=self._registry,
             buckets=_BATCH_BUCKETS,
         )
+        self._prediction_distribution = Histogram(
+            PREDICTION_DISTRIBUTION,
+            "Predicted class labels, by model version.",
+            ("model_version",),
+            registry=self._registry,
+            buckets=_PREDICTION_BUCKETS,
+        )
+        self._confidence_distribution = Histogram(
+            CONFIDENCE_DISTRIBUTION,
+            "Positive-class prediction confidence (probability), by model version.",
+            ("model_version",),
+            registry=self._registry,
+            buckets=_CONFIDENCE_BUCKETS,
+        )
+        self._model_info = Gauge(
+            MODEL_INFO,
+            "Identity of the model currently loaded (always 1).",
+            ("model_id", "version"),
+            registry=self._registry,
+        )
+        self._drift_score = Gauge(
+            DRIFT_SCORE,
+            "Latest data-drift score (PSI) from the worker's offline drift job.",
+            registry=self._registry,
+        )
 
     @property
     def registry(self) -> CollectorRegistry:
@@ -162,6 +209,19 @@ class MetricsRegistry:
     def observe_model_load(self, model_version: str, seconds: float) -> None:
         """Record how long the model artifact took to load."""
         self._model_load_seconds.labels(model_version).observe(seconds)
+
+    def observe_prediction(self, model_version: str, label: int, score: float) -> None:
+        """Record one served prediction: its class label and positive-class confidence."""
+        self._prediction_distribution.labels(model_version).observe(float(label))
+        self._confidence_distribution.labels(model_version).observe(score)
+
+    def set_model_info(self, model_id: str, version: str) -> None:
+        """Mark ``(model_id, version)`` as the currently loaded model (info gauge = 1)."""
+        self._model_info.labels(model_id, version).set(1.0)
+
+    def set_drift_score(self, score: float) -> None:
+        """Publish the latest drift score computed by the worker's drift job."""
+        self._drift_score.set(score)
 
     def record_model_load(self, model_id: str, model_version: str) -> bool:
         """Record the cached load time from ``model_loader``; False if never loaded."""

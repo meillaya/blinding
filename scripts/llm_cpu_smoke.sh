@@ -100,7 +100,32 @@ configure_gateway() {
   local ip="$1"
   log "pointing gateway at LLM_BACKEND=$LLM_BACKEND LLM_URL=http://$ip:$LLM_PORT"
   k set env deployment/gateway "LLM_BACKEND=$LLM_BACKEND" "LLM_URL=http://$ip:$LLM_PORT"
+  wait_gateway_settled
+}
+
+wait_gateway_settled() {
+  # `rollout status` returns once the NEW replicas are ready and the old ones are
+  # scaled down, but an old pod still serves during its ~6s graceful-shutdown
+  # window (Terminating). Querying in that window can hit the OLD pod (no LLM
+  # env) and read a stale /v1/models — so also wait until NO gateway pod carries
+  # a deletionTimestamp (i.e. none are Terminating), bounded.
+  log "waiting for gateway rollout to settle (new pods ready, old pods drained)"
   k rollout status deployment/gateway --timeout=150s
+  local deadline=$((SECONDS + 60))
+  local terminating
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    terminating="$(k get pods -l app.kubernetes.io/name=gateway \
+      -o jsonpath='{.items[*].metadata.deletionTimestamp}')"
+    if [ -z "$terminating" ]; then
+      echo "gateway settled: all pods ready, none Terminating"
+      return 0
+    fi
+    echo "gateway still draining a Terminating pod; waiting..."
+    sleep 2
+  done
+  echo "ERROR: gateway pods still Terminating after 60s" >&2
+  k get pods -l app.kubernetes.io/name=gateway >&2 || true
+  return 1
 }
 
 # shellcheck disable=SC2329  # invoked by teardown(), which runs via the EXIT trap
@@ -146,15 +171,35 @@ body = json.load(sys.stdin)
 content = body['choices'][0]['message']['content']
 print('PASS: /v1/chat/completions returned content:', repr(content))"
 
-  log "GET /v1/models (through the gateway)"
-  local models
-  models="$(gateway_curl GET /v1/models "$api_key")"
-  echo "$models"
-  echo "$models" | python3 -c "import json,sys
-body = json.load(sys.stdin)
+  wait_for_llm_models "$api_key"
+}
+
+wait_for_llm_models() {
+  # Bounded poll (not a one-shot): a stray request can still land on a stale pod
+  # mid-drain and read the model-server's /v1/models, so retry until the LLM's
+  # small-model actually appears rather than failing on the first stale read.
+  local api_key="$1"
+  log "GET /v1/models (bounded poll until small-model appears)"
+  local deadline=$((SECONDS + 60))
+  local models=""
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    models="$(gateway_curl GET /v1/models "$api_key" || true)"
+    if printf '%s' "$models" | python3 -c "import json,sys
+try:
+    body = json.load(sys.stdin)
+except Exception:  # noqa: BLE001
+    sys.exit(1)
 ids = [m.get('id') or m.get('model') or m.get('name') for m in body.get('data', body.get('models', []))]
-assert ids, 'no models listed'
-print('PASS: /v1/models lists:', ids)"
+sys.exit(0 if 'small-model' in ids else 1)"; then
+      echo "$models"
+      echo "PASS: /v1/models lists small-model"
+      return 0
+    fi
+    sleep 2
+  done
+  echo "ERROR: /v1/models did not list small-model within 60s" >&2
+  echo "last response: $models" >&2
+  return 1
 }
 
 # shellcheck disable=SC2329  # invoked indirectly via `trap teardown EXIT`

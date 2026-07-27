@@ -1,0 +1,57 @@
+# Helm values for the in-repo vLLM chart: examples/deployment/chart-helm
+# (chart name: chart-vllm). Deploy:
+#
+#   helm upgrade --install vllm examples/deployment/chart-helm \
+#     -n inferenceops -f serving/vllm/values.yaml
+#
+# GPU REQUIRED: the pod requests one NVIDIA GPU via the extended resource
+# `nvidia.com/gpu`, which the NVIDIA device plugin
+# (https://github.com/NVIDIA/k8s-device-plugin) advertises on GPU nodes only.
+# Without the device plugin + a GPU node group the pod stays Pending
+# (0/N nodes are available: N Insufficient nvidia.com/gpu).
+
+replicaCount: 1
+
+image:
+  repository: vllm/vllm-openai
+  tag: v0.25.1
+  pullPolicy: IfNotPresent
+
+# Model + serving arguments passed to `vllm serve` (see serving/vllm/Dockerfile).
+model: Qwen/Qwen2.5-1.5B-Instruct
+servingArgs:
+  host: 0.0.0.0
+  port: 8000
+  dtype: auto
+  maxModelLen: 4096
+  gpuMemoryUtilization: "0.90"
+  tensorParallelSize: 1
+
+service:
+  type: ClusterIP
+  port: 8000
+
+resources:
+  limits:
+    # The NVIDIA device plugin's extended resource — exactly ONE GPU per pod
+    # (matches --tensor-parallel-size 1). This key is the contract: a typo here
+    # (e.g. nvidia.com/gpus) is silently unschedulable, not a validation error.
+    nvidia.com/gpu: 1
+  requests:
+    cpu: "4"
+    memory: 16Gi
+    nvidia.com/gpu: 1
+
+# GPU container runtime (containerd runtimeClass installed with the device
+# plugin / GPU driver installer on the node group).
+runtimeClassName: nvidia
+
+# Schedule onto the GPU node group only (label applied by the cluster's GPU
+# node pool, e.g. GKE/EKS managed GPU groups or a self-managed taint+label).
+nodeSelector:
+  inferenceops.ai/gpu: "true"
+
+# Kubernetes equivalent of docker --ipc=host: torch/NCCL need a large /dev/shm;
+# the default 64 MiB tmpfs crashes the server under load. The chart should mount
+# this as an emptyDir{medium: Memory} volume at /dev/shm.
+shmSizeLimit: 8Gi

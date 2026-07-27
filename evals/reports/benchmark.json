@@ -1,0 +1,144 @@
+{
+  "generated_at": "2026-07-27T06:11:16.644610+00:00",
+  "prometheus": "http://localhost:19090",
+  "cost_model": {
+    "cpu_node_usd_hr": 0.384,
+    "gpu_node_usd_hr": 1.212,
+    "formula": "replicas * node_usd_hr / (rps * 3600) * 1000"
+  },
+  "columns": [
+    "scenario",
+    "replicas",
+    "RPS",
+    "p95 (ms)",
+    "p99 (ms)",
+    "error rate",
+    "cost / 1k reqs",
+    "cold start (s)",
+    "model load (s)",
+    "GPU util",
+    "throughput / replica"
+  ],
+  "rows": [
+    {
+      "scenario": "baseline CPU (smoke, 2 VUs)",
+      "replicas": "2",
+      "RPS": "37.1",
+      "p95 (ms)": "54.4",
+      "p99 (ms)": "54.8",
+      "error rate": "0.00%",
+      "cost / 1k reqs": "$0.0058",
+      "cold start (s)": "7",
+      "model load (s)": "0.844",
+      "GPU util": "documented (no GPU)",
+      "throughput / replica": "18.6",
+      "raw": {
+        "source": "evals/reports/k6-smoke.json",
+        "requests": 1112,
+        "window_s": 29.98,
+        "error_rate": 0.0,
+        "replicas": 2.0
+      }
+    },
+    {
+      "scenario": "HPA enabled (spike, 70 VUs)",
+      "replicas": "6",
+      "RPS": "2897.5",
+      "p95 (ms)": "65.6",
+      "p99 (ms)": "396.1",
+      "error rate": "93.04%",
+      "cost / 1k reqs": "$0.0002",
+      "cold start (s)": "7",
+      "model load (s)": "0.844",
+      "GPU util": "documented (no GPU)",
+      "throughput / replica": "482.9",
+      "raw": {
+        "source": "evals/reports/k6-spike.json",
+        "requests": 234489,
+        "window_s": 80.93,
+        "error_rate": 0.93044,
+        "replicas": 6.0
+      }
+    },
+    {
+      "scenario": "soak (8 VUs, 90 s)",
+      "replicas": "5",
+      "RPS": "137.9",
+      "p95 (ms)": "60.6",
+      "p99 (ms)": "62.4",
+      "error rate": "0.00%",
+      "cost / 1k reqs": "$0.0039",
+      "cold start (s)": "7",
+      "model load (s)": "0.844",
+      "GPU util": "documented (no GPU)",
+      "throughput / replica": "27.6",
+      "raw": {
+        "source": "evals/reports/k6-soak.json",
+        "requests": 12407,
+        "window_s": 89.99,
+        "error_rate": 0.0,
+        "replicas": 5.0
+      }
+    },
+    {
+      "scenario": "locust (50 users, think 0.5-1.5 s)",
+      "replicas": "2",
+      "RPS": "45.4",
+      "p95 (ms)": "59",
+      "p99 (ms)": "72",
+      "error rate": "0.00%",
+      "cost / 1k reqs": "$0.0047",
+      "cold start (s)": "7",
+      "model load (s)": "0.844",
+      "GPU util": "documented (no GPU)",
+      "throughput / replica": "22.7",
+      "raw": {
+        "source": "evals/reports/locust_stats.csv",
+        "requests": 1318,
+        "window_s": 29.0,
+        "error_rate": 0.0,
+        "replicas": 2.0
+      }
+    },
+    {
+      "scenario": "canary candidate (2.0.0, 10% split)",
+      "replicas": "1",
+      "RPS": "2.7",
+      "p95 (ms)": "73.8",
+      "p99 (ms)": "74.8",
+      "error rate": "0.00%",
+      "cost / 1k reqs": "$0.0390",
+      "cold start (s)": "7",
+      "model load (s)": "0.827",
+      "GPU util": "documented (no GPU)",
+      "throughput / replica": "2.7",
+      "raw": {
+        "source": "evals/reports/k6-canary.json",
+        "candidate": "2.0.0",
+        "split": "90/10",
+        "blended_k6_rps": 38.1,
+        "blended_k6_p95_ms": 53.2,
+        "blended_k6_error_rate": 0.0,
+        "anchor_unix": 1785131729
+      }
+    },
+    {
+      "scenario": "vLLM / GPU LLM (documented)",
+      "replicas": "1 (documented)",
+      "RPS": "documented (no GPU)",
+      "p95 (ms)": "documented (no GPU)",
+      "p99 (ms)": "documented (no GPU)",
+      "error rate": "documented (no GPU)",
+      "cost / 1k reqs": "documented (no GPU)",
+      "cold start (s)": "documented (no GPU)",
+      "model load (s)": "documented (no GPU)",
+      "GPU util": "documented (no GPU)",
+      "throughput / replica": "documented (no GPU)",
+      "raw": {
+        "source": "documented",
+        "note": "no GPU on host; DCGM_FI_DEV_GPU_UTIL absent",
+        "gpu_node_usd_hr": 1.212
+      }
+    }
+  ]
+}

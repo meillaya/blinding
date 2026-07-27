@@ -10,7 +10,15 @@
 # Usage:
 #   scripts/run_load_test.sh                    # smoke @ http://localhost:8080
 #   SCENARIO=stress scripts/run_load_test.sh
+#   SCENARIO=spike scripts/run_load_test.sh     # k6 spike (autoscaling trigger)
+#   SCENARIO=soak DURATION=5m scripts/run_load_test.sh
 #   SCENARIO=smoke TARGET=http://localhost:8080 DURATION=45s scripts/run_load_test.sh
+#
+# NOTE on spike: SCENARIO=spike runs the k6 spike (load_tests/k6/spike.js). This
+# is DISTINCT from `make load-test-spike`, which runs todo 20's lightweight curl
+# burst (scripts/spike_load.sh) — that target is preserved as the verified
+# autoscaling demo. Both drive HPA scale-up; the k6 spike additionally writes the
+# --out json stream the benchmark generator (todo 40) parses.
 #
 # k6 ships via devenv (not the default PATH): run inside `devenv shell`, or the
 # wrapper exits 2 with a hint if k6 is absent.
@@ -25,12 +33,12 @@ DURATION="${DURATION:-30s}"
 # Repo root = parent of this script's dir, so the wrapper works from any CWD.
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# Map SCENARIO -> k6 script. Only the scenarios that EXIST are valid; spike/soak
-# land in todo 38 (this is the foundation). Guard against a typo'd scenario.
+# Map SCENARIO -> k6 script. Only the scenarios that EXIST are valid (smoke/
+# stress from todo 37, spike/soak from todo 38). Guard against a typo'd scenario.
 case "${SCENARIO}" in
-  smoke | stress) SCRIPT="load_tests/k6/${SCENARIO}.js" ;;
+  smoke | stress | spike | soak) SCRIPT="load_tests/k6/${SCENARIO}.js" ;;
   *)
-    echo "run_load_test: unknown SCENARIO '${SCENARIO}' (expected: smoke|stress)" >&2
+    echo "run_load_test: unknown SCENARIO '${SCENARIO}' (expected: smoke|stress|spike|soak)" >&2
     exit 2
     ;;
 esac

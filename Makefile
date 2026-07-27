@@ -59,8 +59,8 @@ load-test-smoke: ## k6 smoke load test (minimal traffic, sanity; writes evals/re
 load-test-spike: ## Spike load test — bounded curl burst that exercises HPA/KEDA scale-up (no k6 needed)
 	scripts/spike_load.sh
 
-load-test-soak: ## k6 soak load test (sustained traffic over time)
-	k6 run load_tests/k6/soak.js
+load-test-soak: ## k6 soak load test (sustained moderate traffic; writes evals/reports/k6-soak.json)
+	SCENARIO=soak scripts/run_load_test.sh
 
 load-test-stress: ## k6 stress load test (push past capacity; writes evals/reports/k6-stress.json)
 	SCENARIO=stress scripts/run_load_test.sh

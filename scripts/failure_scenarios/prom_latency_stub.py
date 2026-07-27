@@ -39,19 +39,19 @@ STABLE_P95 = os.environ.get("STUB_STABLE_P95", "0.1")
 PORT_FILE = os.environ["STUB_PORT_FILE"]
 
 
-def scalar(value: str) -> dict:
+def scalar(value: str) -> dict[str, object]:
     return {
         "status": "success",
         "data": {"resultType": "vector", "result": [{"metric": {}, "value": [time.time(), value]}]},
     }
 
 
-def empty() -> dict:
+def empty() -> dict[str, object]:
     return {"status": "success", "data": {"resultType": "vector", "result": []}}
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
-    def _send_json(self, obj: dict) -> None:
+    def _send_json(self, obj: dict[str, object]) -> None:
         body = json.dumps(obj).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -81,7 +81,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         self._send_json(empty())
 
-    def log_message(self, *args: object) -> None:  # silence per-request stderr
+    def log_message(self, format: str, *args: object) -> None:  # noqa: A002 - match base signature (format is the base param name)
         pass
 
 

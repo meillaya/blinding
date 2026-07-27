@@ -429,6 +429,12 @@ On kind there are no GPUs and no taints, so the local overlay
 (`k8s/overlays/local/`) leaves scheduling to the base soft anti-affinity and
 sets `imagePullPolicy: Never` (images are `kind load`'d — there is no registry).
 
+The node side of this composition (the tainted `g5.xlarge` group, the NVIDIA
+device plugin that advertises `nvidia.com/gpu`) is provisioned by the EKS
+Terraform, and the model-server's S3 artifact reads ride IRSA rather than
+static keys: [aws-deployment.md](aws-deployment.md) §5 (IRSA) and §6 (GPU
+node group) walk through both.
+
 ---
 
 ## 11. imagePullPolicy
@@ -471,3 +477,14 @@ Remove any field (e.g. `kubectl … patch deployment model-server --type=json
 -p='[{"op":"remove","path":"/spec/template/spec/containers/0/lifecycle"}]'`)
 and the corresponding check flips to `FAIL` with a non-zero exit; re-apply
 `kubectl apply -k k8s/overlays/local` to restore.
+
+---
+
+## See also
+
+- [architecture.md](architecture.md): system topology, the request path, the model lifecycle, and the observability pipeline these manifests feed.
+- [aws-deployment.md](aws-deployment.md): the EKS Terraform that provisions the nodes these pods run on (IRSA §5, GPU node group §6, prod overlay deploy §7).
+- [autoscaling-strategy.md](autoscaling-strategy.md): the external-RPS metric path, HPA vs KEDA, and Karpenter node autoscaling in depth.
+- [observability.md](observability.md): the metrics/traces/logs stack and SLI/SLO contract built on these probes and metrics.
+- [incident-runbook.md](incident-runbook.md): alert response procedures.
+- [serving/fastapi/deployment.md](../serving/fastapi/deployment.md): the step-by-step deploy guide (kind + EKS) for the workload described here.

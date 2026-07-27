@@ -10,12 +10,15 @@ export DOCKER_HOST ?= unix:///run/user/1000/docker-me.sock
 # Image tag used by the docker-build target (override with IMAGE=...).
 IMAGE ?= inferenceops/model-server:dev
 
+# Ingress URL the locust load test targets (override with LOCUST_HOST=...).
+LOCUST_HOST ?= http://localhost:8080
+
 # `make` with no arguments shows the help.
 .DEFAULT_GOAL := help
 
 .PHONY: help run-local test lint typecheck coverage-gate docker-build ci-local \
 	deploy-local deploy-staging \
-	load-test-smoke load-test-spike load-test-soak load-test-stress \
+	load-test-smoke load-test-spike load-test-soak load-test-stress load-test-locust \
 	deploy-canary promote rollback \
 	eval train llm-cpu-smoke canary-check batch
 
@@ -64,6 +67,12 @@ load-test-soak: ## k6 soak load test (sustained moderate traffic; writes evals/r
 
 load-test-stress: ## k6 stress load test (push past capacity; writes evals/reports/k6-stress.json)
 	SCENARIO=stress scripts/run_load_test.sh
+
+load-test-locust: ## Locust headless load test (50 users/30s; writes evals/reports/locust CSV + HTML)
+	mkdir -p evals/reports
+	uv run --with locust locust -f load_tests/locust/locustfile.py --headless \
+		-u 50 -r 10 -t 30s --host $(LOCUST_HOST) \
+		--csv=evals/reports/locust --html=evals/reports/locust.html
 
 ## Canary / release lifecycle
 deploy-canary: ## Deploy a canary model version (usage: make deploy-canary MODEL_VERSION=v4)

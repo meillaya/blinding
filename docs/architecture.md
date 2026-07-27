@@ -196,6 +196,10 @@ external-metric APIService exclusivity, GPU autoscaling caveats) is in
 
 ## 6. AWS / EKS topology
 
+> **Optional.** The AWS/EKS topology below is the optional deployment target.
+> The kind topology in sections 1 through 5 above is the core; the platform is
+> fully functional on local kind without any AWS resources.
+
 Production runs the same workloads on EKS. Terraform roots under
 [infra/terraform/envs/](../infra/terraform/envs/) (`dev`, `staging`, `prod`)
 wire seven modules from [infra/terraform/modules/](../infra/terraform/modules/):

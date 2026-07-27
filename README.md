@@ -4,8 +4,13 @@ An end-to-end MLOps platform that trains, serves, and operates a fraud-detection
 model the way a production team would. It pairs a FastAPI model server and an API
 gateway with Kubernetes deployment, autoscaling, canary release with automated
 rollback, a model registry, full observability, and load testing with real
-benchmark numbers. The core runs locally on your laptop; the same manifests and
-Terraform target AWS EKS.
+benchmark numbers. **The core platform runs entirely locally on kind**: the
+model server, gateway, canary with automated rollback, HPA/KEDA autoscaling,
+Prometheus/Grafana/OTel/Loki observability, k6/locust load testing, and the
+serving backends all work on a laptop with no AWS account, credentials, or
+spend. An optional AWS/Terraform layer under
+[`infra/terraform/`](infra/terraform) shows the same manifests targeting EKS
+for AWS-readiness, but nothing in the local platform depends on it.
 
 The default model is a scikit-learn fraud classifier served on CPU. The serving
 layer is pluggable: vLLM (GPU LLM), KServe, and Ray Serve are documented alongside
@@ -241,6 +246,10 @@ accuracy/latency/regression gates), `make train` (regenerate the artifact),
 MODEL_VERSION=v4` / `make promote` / `make rollback`.
 
 ## AWS Deployment
+
+> **Optional.** Everything below this point is the optional AWS/Terraform layer.
+> The platform runs fully on local kind without any of it. See the
+> [Quickstart](#quickstart) above for the local-only path.
 
 The local manifests are a kustomize overlay of the same base used for AWS, so the
 platform deploys to EKS through Terraform in [`infra/terraform`](infra/terraform).

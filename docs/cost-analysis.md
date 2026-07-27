@@ -1,5 +1,9 @@
 # Cost analysis
 
+> **Note.** The AWS/GPU cost figures on this page apply to the optional AWS
+> deployment path. The core local kind path has no infrastructure cost beyond
+> your own laptop.
+
 Every measured number on this page comes from the real local benchmark
 ([../evals/reports/benchmark.md](../evals/reports/benchmark.md), generated
 2026-07-27 from k6/locust runs plus live Prometheus). Pricing is public

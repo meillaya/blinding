@@ -1,5 +1,11 @@
 # AWS deployment
 
+> **Optional.** This entire AWS/Terraform layer is optional. The core platform
+> runs fully on a local kind cluster with no AWS account, credentials, or spend.
+> Nothing in the local platform depends on anything described here. For the
+> local-only path, see the [README Quickstart](../README.md#quickstart) and
+> [serving/fastapi/deployment.md](../serving/fastapi/deployment.md).
+
 How the InferenceOps platform lands on AWS: the Terraform modules under
 [infra/terraform/modules/](../infra/terraform/modules/), the environment roots
 under [infra/terraform/envs/](../infra/terraform/envs/), the credential-free

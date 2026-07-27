@@ -1,0 +1,46 @@
+# Canary rollout — DOCUMENTED CONSTRAINT, not functionally tested on kind (todo 44).
+#
+# canaryTrafficPercent is Serverless/Knative-ONLY on KServe 0.18 Standard mode.
+# Percentage traffic splitting needs Knative's revision routing (two Knative
+# Services + a Knative ingress splitting requests by percentage); Standard mode
+# deliberately has no Knative layer, so on 0.18 the field is ACCEPTED by the
+# CRD/webhook but IGNORED by the controller — the ISVC rolls out as a single
+# Deployment with a plain RollingUpdate and no traffic split. Standard-mode
+# canary traffic (canaryTrafficPercent honored without Knative) landed in
+# KServe 0.19+; this cluster pins 0.18, so canary here is documentation only.
+# (Verified live in /tmp/qa/t44_kserve_fail.txt: the ISVC below applies cleanly
+# yet produces exactly ONE predictor Deployment and no split.)
+#
+# What 0.18 Standard mode DOES offer instead: `spec.predictor.deploymentStrategy`
+# (RollingUpdate / Recreate / BlueGreen pod-replacement ORDERING via the
+# rollout-strategy feature) — that controls HOW pods swap, not what percentage
+# of traffic each version receives. For real progressive delivery on this
+# cluster use the nginx-ingress canary (k8s/canary/ + scripts/canary_check.sh,
+# todo 30), or upgrade to KServe 0.19+ for Standard-mode canary traffic.
+#
+# For reference, the Serverless shape (default mode + Knative installed) is
+# this same manifest WITHOUT the deploymentMode annotation; the Knative
+# revisions then honor canaryTrafficPercent.
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: sklearn-canary-doc
+  namespace: inferenceops
+  annotations:
+    serving.kserve.io/deploymentMode: Standard
+    serving.kserve.io/autoscalerClass: hpa
+spec:
+  predictor:
+    # INERT on 0.18 Standard mode (Serverless/Knative-only; honored in 0.19+).
+    canaryTrafficPercent: 20
+    model:
+      modelFormat:
+        name: sklearn
+      storageUri: gs://kfserving-examples/models/sklearn/1.0/model
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi

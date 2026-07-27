@@ -1,0 +1,53 @@
+# Trivial sklearn InferenceService — KServe 0.18 STANDARD mode (todo 44).
+#
+# Standard mode (annotation serving.kserve.io/deploymentMode: Standard;
+# `RawDeployment` is the deprecated alias) renders this ISVC as plain
+# Kubernetes objects — a Deployment + Service (+ HPA) — with NO Knative or
+# Istio dependency, so it runs on the bare kind cluster that
+# scripts/install_kserve.sh produces. The cluster-wide default deployment
+# mode is Serverless (which needs Knative), so the annotation is REQUIRED
+# here: without it the controller would try to create a Knative Service this
+# cluster cannot run and the ISVC would never go Ready.
+#
+# serving.kserve.io/autoscalerClass: hpa selects the Kubernetes HPA class
+# (the Serverless default `kpa` is Knative-only). autoscaling.yaml shows the
+# KServe-managed HPA's metric fields (scaleMetric / scaleTarget).
+#
+# The model is the canonical public KServe sample (iris, a ~1 MB joblib)
+# pulled from the public kfserving-examples GCS bucket by the
+# storage-initializer initContainer — no storage credentials required.
+#
+# Apply + verify:
+#
+#   kubectl --context kind-inferenceops apply -f serving/kserve/inferenceservice.yaml
+#   kubectl --context kind-inferenceops -n inferenceops wait \
+#     --for=condition=Ready isvc/sklearn-iris --timeout=600s
+#
+# Predict (port-forward the predictor Service):
+#
+#   kubectl --context kind-inferenceops -n inferenceops port-forward \
+#     svc/sklearn-iris-predictor 8081:80 &
+#   curl -s http://localhost:8081/v1/models/sklearn-iris:predict \
+#     -H 'Content-Type: application/json' \
+#     -d '{"instances": [[6.8, 2.8, 4.8, 1.4], [6.0, 3.4, 4.5, 1.6]]}'
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: sklearn-iris
+  namespace: inferenceops
+  annotations:
+    serving.kserve.io/deploymentMode: Standard
+    serving.kserve.io/autoscalerClass: hpa
+spec:
+  predictor:
+    model:
+      modelFormat:
+        name: sklearn
+      storageUri: gs://kfserving-examples/models/sklearn/1.0/model
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi

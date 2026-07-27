@@ -14,6 +14,7 @@ JSON. Instances are frozen: parsed once at startup, shared immutably.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from typing import Final
 
 from pydantic.fields import FieldInfo
@@ -26,6 +27,17 @@ from pydantic_settings import (
 
 DEFAULT_MODEL_SERVER_URL: Final = "http://localhost:8080"
 DEFAULT_RATE_LIMIT_RPS: Final = 100.0
+
+# Default base URL per LLM backend (todo 43). Each backend serves the
+# OpenAI-compatible surface (/v1/completions, /v1/chat/completions, /v1/models)
+# on its own port; ``llm_base_url`` picks the entry for ``llm_backend`` unless
+# ``llm_url`` overrides it (e.g. the host address seen from inside kind, where
+# the CPU LLM runs on the host and the gateway runs in-cluster).
+LLM_BACKEND_DEFAULT_URLS: Final[Mapping[str, str]] = {
+    "llama-cpu": "http://localhost:8001",  # llama.cpp llama-server
+    "ollama": "http://localhost:11434",  # ollama serve (OpenAI-compatible)
+    "vllm": "http://localhost:8000",  # vLLM OpenAI server (GPU; todo 42)
+}
 
 
 def _parse_api_keys_env(raw: str) -> object:
@@ -60,7 +72,8 @@ class GatewaySettings(BaseSettings):
     api_keys: frozenset[str] = frozenset()
     rate_limit_rps: float = DEFAULT_RATE_LIMIT_RPS
     otel_endpoint: str | None = None
-    llm_backend: str | None = None  # reserved for the CPU-LLM route (todo 43)
+    llm_backend: str | None = None  # llama-cpu | ollama | vllm (todo 43); empty = no LLM
+    llm_url: str | None = None  # explicit LLM base URL; overrides the backend default
 
     @classmethod
     def settings_customise_sources(
@@ -82,3 +95,18 @@ class GatewaySettings(BaseSettings):
 def get_settings() -> GatewaySettings:
     """Build the gateway settings from the current environment."""
     return GatewaySettings()
+
+
+def llm_base_url(settings: GatewaySettings) -> str | None:
+    """The LLM backend base URL, or None when no LLM is configured.
+
+    ``llm_url`` wins (the explicit override); otherwise the ``llm_backend``
+    selects a default from ``LLM_BACKEND_DEFAULT_URLS``. Empty strings (an
+    unset configmap key) count as absent, so a gateway with ``LLM_BACKEND=""``
+    has no LLM and its OpenAI routes answer 503.
+    """
+    if settings.llm_url:
+        return settings.llm_url
+    if settings.llm_backend:
+        return LLM_BACKEND_DEFAULT_URLS.get(settings.llm_backend)
+    return None

@@ -50,6 +50,33 @@ PREDICT_BODY: Final = {
 }
 MODELS_BODY: Final = [{"model_id": "fraud-detector", "version": "1.0.0"}]
 
+# Canned LLM-backend (OpenAI-compatible) bodies — shaped like llama.cpp/ollama/
+# vLLM responses and DELIBERATELY unlike the model-server bodies above, so a
+# proxy test that asserts one of these proves the bytes came from the mocked LLM
+# upstream (todo 43).
+LLM_COMPLETIONS_BODY: Final = {
+    "id": "cmpl-test-1",
+    "object": "text_completion",
+    "model": "small-model",
+    "choices": [{"text": "hello world", "index": 0, "finish_reason": "stop"}],
+}
+LLM_CHAT_BODY: Final = {
+    "id": "chatcmpl-test-1",
+    "object": "chat.completion",
+    "model": "small-model",
+    "choices": [
+        {
+            "index": 0,
+            "message": {"role": "assistant", "content": "hi there"},
+            "finish_reason": "stop",
+        }
+    ],
+}
+LLM_MODELS_BODY: Final = {
+    "object": "list",
+    "data": [{"id": "small-model", "object": "model", "owned_by": "llama.cpp"}],
+}
+
 
 @pytest.fixture()
 def valid_key() -> str:
@@ -116,5 +143,72 @@ def client(
 ) -> Iterator[TestClient]:
     """A started gateway app wired to the mocked upstream + in-memory telemetry."""
     app = create_app(settings, transport=mock_transport, telemetry=telemetry)
+    with TestClient(app) as started:
+        yield started
+
+
+@pytest.fixture()
+def llm_completions_body() -> dict[str, object]:
+    """The mocked LLM backend's canned /v1/completions body (todo 43)."""
+    return dict(LLM_COMPLETIONS_BODY)
+
+
+@pytest.fixture()
+def llm_chat_body() -> dict[str, object]:
+    """The mocked LLM backend's canned /v1/chat/completions body (todo 43)."""
+    return dict(LLM_CHAT_BODY)
+
+
+@pytest.fixture()
+def llm_models_body() -> dict[str, object]:
+    """The mocked LLM backend's canned /v1/models body (todo 43)."""
+    return dict(LLM_MODELS_BODY)
+
+
+@pytest.fixture()
+def llm_upstream_requests() -> list[httpx.Request]:
+    """Every request the mocked LLM backend receives, in order (todo 43)."""
+    return []
+
+
+@pytest.fixture()
+def llm_mock_transport(llm_upstream_requests: list[httpx.Request]) -> httpx.MockTransport:
+    """The mocked OpenAI-compatible LLM backend: records requests, canned bodies."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        llm_upstream_requests.append(request)
+        if request.url.path == "/v1/completions":
+            return httpx.Response(200, json=LLM_COMPLETIONS_BODY)
+        if request.url.path == "/v1/chat/completions":
+            return httpx.Response(200, json=LLM_CHAT_BODY)
+        if request.url.path == "/v1/models":
+            return httpx.Response(200, json=LLM_MODELS_BODY)
+        return httpx.Response(404, json={"detail": "unknown LLM path"})
+
+    return httpx.MockTransport(handler)
+
+
+@pytest.fixture()
+def llm_settings(valid_key: str) -> GatewaySettings:
+    """Gateway settings with an LLM backend configured (todo 43)."""
+    return GatewaySettings(
+        api_keys=frozenset({valid_key}), rate_limit_rps=100.0, llm_backend="llama-cpu"
+    )
+
+
+@pytest.fixture()
+def llm_client(
+    llm_settings: GatewaySettings,
+    mock_transport: httpx.MockTransport,
+    llm_mock_transport: httpx.MockTransport,
+    telemetry: Telemetry,
+) -> Iterator[TestClient]:
+    """A started gateway with BOTH upstreams mocked: model-server + LLM backend."""
+    app = create_app(
+        llm_settings,
+        transport=mock_transport,
+        llm_transport=llm_mock_transport,
+        telemetry=telemetry,
+    )
     with TestClient(app) as started:
         yield started

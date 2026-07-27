@@ -53,8 +53,15 @@ def _passthrough_headers(response: httpx.Response) -> dict[str, str]:
     }
 
 
-async def _proxy(request: Request, client: httpx.AsyncClient) -> Response:
-    """Forward one request to the model server and mirror its response."""
+async def proxy_request(
+    request: Request, client: httpx.AsyncClient, *, backend: str = "model server"
+) -> Response:
+    """Forward one request to an upstream and mirror its response.
+
+    ``backend`` names the upstream in the gateway's error bodies so a caller can
+    tell a model-server failure from an LLM-backend failure. Shared by the
+    model-server routes here and the LLM routes (routes/llm.py).
+    """
     target = request.url.path
     if request.url.query:
         target = f"{target}?{request.url.query}"
@@ -64,9 +71,9 @@ async def _proxy(request: Request, client: httpx.AsyncClient) -> Response:
             request.method, target, content=body, headers=_forward_headers(request)
         )
     except httpx.TimeoutException:
-        return JSONResponse({"detail": "model server timeout"}, status_code=504)
+        return JSONResponse({"detail": f"{backend} timeout"}, status_code=504)
     except httpx.HTTPError:
-        return JSONResponse({"detail": "model server unavailable"}, status_code=502)
+        return JSONResponse({"detail": f"{backend} unavailable"}, status_code=502)
     return Response(
         content=upstream.content,
         status_code=upstream.status_code,
@@ -74,20 +81,26 @@ async def _proxy(request: Request, client: httpx.AsyncClient) -> Response:
     )
 
 
-def build_proxy_router(client: httpx.AsyncClient) -> APIRouter:
-    """The proxied model-server routes: /v1/predict, /v1/batch, /v1/models."""
+def build_proxy_router(client: httpx.AsyncClient, *, include_models: bool = True) -> APIRouter:
+    """The proxied model-server routes: /v1/predict, /v1/batch, and /v1/models.
+
+    ``include_models`` is False when an LLM backend is configured: the OpenAI
+    ``/v1/models`` surface then belongs to the LLM router (routes/llm.py), so
+    exactly one ``/v1/models`` route is ever registered.
+    """
     router = APIRouter()
 
     async def proxy_predict(request: Request) -> Response:
-        return await _proxy(request, client)
+        return await proxy_request(request, client)
 
     async def proxy_batch(request: Request) -> Response:
-        return await _proxy(request, client)
+        return await proxy_request(request, client)
 
     async def proxy_models(request: Request) -> Response:
-        return await _proxy(request, client)
+        return await proxy_request(request, client)
 
     router.add_api_route("/v1/predict", proxy_predict, methods=["POST"])
     router.add_api_route("/v1/batch", proxy_batch, methods=["POST"])
-    router.add_api_route("/v1/models", proxy_models, methods=["GET"])
+    if include_models:
+        router.add_api_route("/v1/models", proxy_models, methods=["GET"])
     return router

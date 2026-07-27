@@ -128,14 +128,101 @@ def test_upstream_timeout_surfaces_as_504(telemetry: Telemetry, valid_key: str) 
     assert body["detail"] == "model server timeout"
 
 
-def test_llm_routes_are_reserved_with_501(client: TestClient, valid_key: str) -> None:
+def test_completions_proxies_the_llm_upstream_body_verbatim(
+    llm_client: TestClient,
+    valid_key: str,
+    llm_completions_body: dict[str, object],
+    llm_upstream_requests: list[httpx.Request],
+) -> None:
+    """todo 43: /v1/completions forwards to the LLM backend, body unchanged."""
+    payload: Mapping[str, object] = {"model": "small-model", "prompt": "hi", "max_tokens": 8}
+    response = _post_json(llm_client, "/v1/completions", payload, {"X-API-Key": valid_key})
+    assert response.status_code == 200
+    proxied: dict[str, object] = response.json()
+    assert proxied == llm_completions_body  # the mocked LLM's exact body
+    assert len(llm_upstream_requests) == 1
+    forwarded = llm_upstream_requests[0]
+    assert forwarded.method == "POST"
+    assert forwarded.url.path == "/v1/completions"
+    forwarded_body: dict[str, object] = json.loads(forwarded.content)
+    assert forwarded_body == dict(payload)  # request body forwarded verbatim
+    assert "x-api-key" not in forwarded.headers  # gateway credentials never leak
+
+
+def test_chat_completions_is_proxied(
+    llm_client: TestClient, valid_key: str, llm_chat_body: dict[str, object]
+) -> None:
+    payload: Mapping[str, object] = {
+        "model": "small-model",
+        "messages": [{"role": "user", "content": "hi"}],
+    }
+    response = _post_json(llm_client, "/v1/chat/completions", payload, {"X-API-Key": valid_key})
+    assert response.status_code == 200
+    proxied: dict[str, object] = response.json()
+    assert proxied == llm_chat_body
+
+
+def test_models_lists_the_llm_models_when_backend_configured(
+    llm_client: TestClient, valid_key: str, llm_models_body: dict[str, object]
+) -> None:
+    """With an LLM backend, /v1/models is the OpenAI model list (not model-server)."""
+    response = _get(llm_client, "/v1/models", {"X-API-Key": valid_key})
+    assert response.status_code == 200
+    proxied: dict[str, object] = response.json()
+    assert proxied == llm_models_body
+
+
+def test_llm_upstream_connection_error_surfaces_as_502(
+    llm_settings: GatewaySettings,
+    mock_transport: httpx.MockTransport,
+    telemetry: Telemetry,
+    valid_key: str,
+) -> None:
+    def refusing(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused", request=request)
+
+    app = create_app(
+        llm_settings, transport=mock_transport, llm_transport=httpx.MockTransport(refusing),
+        telemetry=telemetry,
+    )
+    with TestClient(app) as client:
+        response = _post_json(client, "/v1/completions", {"prompt": "hi"}, {"X-API-Key": valid_key})
+    assert response.status_code == 502
+    body: dict[str, object] = response.json()
+    assert body["detail"] == "LLM backend unavailable"
+
+
+def test_llm_upstream_timeout_surfaces_as_504(
+    llm_settings: GatewaySettings,
+    mock_transport: httpx.MockTransport,
+    telemetry: Telemetry,
+    valid_key: str,
+) -> None:
+    def too_slow(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("upstream too slow", request=request)
+
+    app = create_app(
+        llm_settings, transport=mock_transport, llm_transport=httpx.MockTransport(too_slow),
+        telemetry=telemetry,
+    )
+    with TestClient(app) as client:
+        response = _post_json(client, "/v1/completions", {"prompt": "hi"}, {"X-API-Key": valid_key})
+    assert response.status_code == 504
+    body: dict[str, object] = response.json()
+    assert body["detail"] == "LLM backend timeout"
+
+
+def test_llm_routes_return_503_when_no_backend_configured(
+    client: TestClient, valid_key: str
+) -> None:
+    """The default gateway (no LLM_BACKEND) fails loud on the OpenAI routes."""
     headers = {"X-API-Key": valid_key}
     completions = _post_json(client, "/v1/completions", {"prompt": "hi"}, headers)
     chat = _post_json(client, "/v1/chat/completions", {"messages": []}, headers)
-    assert completions.status_code == 501
-    assert chat.status_code == 501
-    completions_body: dict[str, object] = completions.json()
-    assert "todo 43" in str(completions_body["detail"])
+    assert completions.status_code == 503
+    assert chat.status_code == 503
+    body: dict[str, object] = completions.json()
+    assert body["detail"] == "LLM backend not configured"
 
 
 def test_route_table_has_exactly_the_expected_surface(

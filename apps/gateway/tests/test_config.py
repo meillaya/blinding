@@ -7,7 +7,12 @@ can never leak into an assertion; overrides are then set explicitly.
 from __future__ import annotations
 
 import pytest
-from inferenceops_gateway.config import GatewaySettings, get_settings
+from inferenceops_gateway.config import (
+    LLM_BACKEND_DEFAULT_URLS,
+    GatewaySettings,
+    get_settings,
+    llm_base_url,
+)
 from pydantic import ValidationError
 
 _ENV_VARS = (
@@ -18,6 +23,7 @@ _ENV_VARS = (
     "RATE_LIMIT_RPS",
     "OTEL_ENDPOINT",
     "LLM_BACKEND",
+    "LLM_URL",
 )
 
 
@@ -70,3 +76,26 @@ def test_settings_are_frozen() -> None:
     cfg = GatewaySettings()
     with pytest.raises(ValidationError):
         cfg.rate_limit_rps = 1.0  # pyright: ignore[reportAttributeAccessOverride]
+
+
+def test_llm_base_url_none_when_unconfigured() -> None:
+    assert llm_base_url(GatewaySettings()) is None
+
+
+def test_llm_base_url_empty_backend_counts_as_unconfigured() -> None:
+    """An unset configmap key arrives as "" — treat it as no LLM (503, not a URL)."""
+    assert llm_base_url(GatewaySettings(llm_backend="")) is None
+
+
+def test_llm_base_url_selects_the_backend_default() -> None:
+    for backend, url in LLM_BACKEND_DEFAULT_URLS.items():
+        assert llm_base_url(GatewaySettings(llm_backend=backend)) == url
+
+
+def test_llm_base_url_unknown_backend_is_none() -> None:
+    assert llm_base_url(GatewaySettings(llm_backend="nope")) is None
+
+
+def test_llm_url_overrides_the_backend_default() -> None:
+    cfg = GatewaySettings(llm_backend="llama-cpu", llm_url="http://172.18.0.1:8001")
+    assert llm_base_url(cfg) == "http://172.18.0.1:8001"

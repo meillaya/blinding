@@ -1,0 +1,51 @@
+# =============================================================================
+# SCAFFOLD ONLY. NO RUNNING RAY IMPLEMENTATION.
+# =============================================================================
+# This is the `serve deploy` config that mirrors deployment.py. It documents
+# how the InferenceOps fraud model-server WOULD be deployed behind Ray Serve.
+# It is NOT applied anywhere: no CI workflow, docker-compose service, Makefile
+# target, or script in this repo runs `serve deploy` or `ray start`. `ray` is
+# not a project dependency. The production serving path is the FastAPI
+# model-server (apps/model-server, k8s/base/deployment-model-server.yaml).
+#
+# A real deploy would run, from this directory:
+#     serve deploy serve_config.yaml
+# which imports `deployment:app` (the module-level binding in deployment.py)
+# and serves it at route_prefix /. Neither that command nor `ray start` is
+# wired into this repo. See serving/README.md for why Ray Serve is documented
+# but not run, and docs/autoscaling-strategy.md for the autoscaling contrast.
+# =============================================================================
+
+applications:
+  - name: fraud_detector
+    route_prefix: /
+    # deployment.py exposes `app = FraudDetectorDeployment.bind(...)` at module
+    # level; Ray Serve calls it to build the application graph.
+    import_path: deployment:app
+
+    runtime_env:
+      # The scaffold lives beside this file. A real deploy would also pin
+      # `ray[serve]` and the model-server package here; both are omitted because
+      # nothing in this repo installs or runs them.
+      working_dir: .
+
+    deployments:
+      - name: FraudDetectorDeployment
+        # Queue-size autoscaling. Ray Serve counts the ongoing (queued) requests
+        # per replica and scales to hold the average at target_ongoing_requests.
+        # This mirrors the FastAPI HPA's external-RPS target (inferenceops_rps,
+        # averageValue "30" per replica) and its 2..10 replica band. When
+        # autoscaling_config is set, num_replicas is omitted on purpose;
+        # initial_replicas below governs the starting count.
+        autoscaling_config:
+          min_replicas: 2          # HA floor (matches HPA minReplicas: 2)
+          max_replicas: 10         # ceiling (matches HPA maxReplicas: 10)
+          initial_replicas: 2
+          target_ongoing_requests: 30   # ~30 in-flight reqs per replica
+          smoothing_factor: 1.0
+          upscale_delay_s: 10
+          downscale_delay_s: 60    # mirror the HPA's 60s scale-down window
+        ray_actor_options:
+          num_cpus: 2              # matches the model-server requests.cpu "2"
+          # num_gpus: 1            # UNCOMMENT for a GPU model (e.g. vLLM). The
+          # default fraud model is CPU-only, so no GPU is requested.

@@ -41,8 +41,6 @@ typeCheckingMode = "standard"
 pythonVersion = "3.12"
 include = ["src"]
 exclude = ["**/__pycache__", ".venv", ".sandbox", "results"]
-venvPath = "."
-venv = ".venv"
 
 [tool.coverage.run]
 source = ["src"]

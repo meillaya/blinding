@@ -168,7 +168,7 @@ cmd_verify() {
             echo "readonly root writable" >&2
             exit 3
         fi
-        test -w /work || { echo "workspace not writable" >&2; exit 3; }
+        test -w "$BLINDING_ROOT" || { echo "workspace not writable" >&2; exit 3; }
         echo "readonly root denied writes"
         echo "workspace writable"
     '

@@ -1,9 +1,0 @@
-{
-  "accuracy": 0.9655,
-  "f1": 0.6101694915254238,
-  "generated_at": "2026-07-22T09:33:29Z",
-  "golden_dataset": "evals/golden_dataset.jsonl",
-  "golden_dataset_rows": 2000,
-  "model_path": "models/artifacts/fraud_detector/model.pkl",
-  "roc_auc": 0.9184038458787003
-}

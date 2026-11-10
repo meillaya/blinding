@@ -1,0 +1,89 @@
+# Pinned models. Every revision is a full commit hash and every file carries
+# the size and SHA-256 that the downloader checks before the file is used.
+#
+# The 7B entries are split into shards by the upstream repo. A quant lists its
+# shards in order; the first shard is the path handed to llama-server.
+
+[[models]]
+id = "qwen2.5-0.5b-instruct"
+repo = "Qwen/Qwen2.5-0.5B-Instruct-GGUF"
+revision = "9217f5db79a29953eb74d5343926648285ec7e67"
+context = 32768
+default_quant = "q4_k_m"
+
+[[models.files]]
+quant = "q4_0"
+shard = 1
+file = "qwen2.5-0.5b-instruct-q4_0.gguf"
+sha256 = "7671c0c304e6ce5a7fc577bcb12aba01e2c155cc2efd29b2213c95b18edaf6ed"
+size = 428730208
+
+[[models.files]]
+quant = "q4_k_m"
+shard = 1
+file = "qwen2.5-0.5b-instruct-q4_k_m.gguf"
+sha256 = "74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db"
+size = 491400032
+
+[[models.files]]
+quant = "q8_0"
+shard = 1
+file = "qwen2.5-0.5b-instruct-q8_0.gguf"
+sha256 = "ca59ca7f13d0e15a8cfa77bd17e65d24f6844b554a7b6c12e07a5f89ff76844e"
+size = 675710816
+
+[[models]]
+id = "qwen2.5-7b-instruct"
+repo = "Qwen/Qwen2.5-7B-Instruct-GGUF"
+revision = "bb5d59e06d9551d752d08b292a50eb208b07ab1f"
+context = 32768
+default_quant = "q4_k_m"
+
+[[models.files]]
+quant = "q4_k_m"
+shard = 1
+file = "qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf"
+sha256 = "dfce12e3862a5283ccfb88221b48480e58745165de856439950d0f22590580db"
+size = 3993201344
+
+[[models.files]]
+quant = "q4_k_m"
+shard = 2
+file = "qwen2.5-7b-instruct-q4_k_m-00002-of-00002.gguf"
+sha256 = "539cf93f78e887edea1c04e2d7d8cdaca9d01dae9c9025bcb8accbe29df3d72a"
+size = 689872288
+
+[[models.files]]
+quant = "q8_0"
+shard = 1
+file = "qwen2.5-7b-instruct-q8_0-00001-of-00003.gguf"
+sha256 = "26e30cb4559f0d9e9e11f34d351292af6f42199ce3fa742b5e7c5af4bc35b0f0"
+size = 3980069248
+
+[[models.files]]
+quant = "q8_0"
+shard = 2
+file = "qwen2.5-7b-instruct-q8_0-00002-of-00003.gguf"
+sha256 = "e93856ce0cb05d5abd698eb439c0fea3acd412d9040f5ab7d2d4d088add5287d"
+size = 3942935680
+
+[[models.files]]
+quant = "q8_0"
+shard = 3
+file = "qwen2.5-7b-instruct-q8_0-00003-of-00003.gguf"
+sha256 = "8f29c0e4173d4d92d35c52a7c5807c34a3edfe6bb078ea785d145b7d88c16e44"
+size = 175520480
+
+[[models]]
+id = "stories260k-f32"
+repo = "ggml-org/test-model-stories260K"
+revision = "479896ec924af6d40fd419ab8f4d1eb2101de00d"
+context = 512
+default_quant = "f32"
+
+[[models.files]]
+quant = "f32"
+shard = 1
+file = "stories260K-f32.gguf"
+sha256 = "270cba1bd5109f42d03350f60406024560464db173c0e387d91f0426d3bd256d"
+size = 1185376

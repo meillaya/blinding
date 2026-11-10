@@ -1,0 +1,9 @@
+.git
+.sandbox
+.venv
+__pycache__
+.pytest_cache
+.ruff_cache
+*.pyc
+results
+docs/figures/*.png

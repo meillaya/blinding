@@ -1,0 +1,16 @@
+# CPU serving profile. Threads are left at a measured value rather than "all
+# cores" because the benchmark showed 8 threads ahead of 16 on this host.
+name = "local-cpu"
+device = "cpu"
+threads = 8
+threads_batch = 0
+ctx_size = 4096
+batch_size = 512
+ubatch_size = 128
+flash_attn = "auto"
+cache_type_k = "f16"
+cache_type_v = "f16"
+parallel = 1
+gpu_layers = 0
+host = "127.0.0.1"
+port = 8001

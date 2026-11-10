@@ -1,102 +1,85 @@
-# InferenceOps — operator interface.
+# Blinding operator interface.
 #
-# Self-documenting: `make` (or `make help`) lists every target with its
-# description, parsed from the `## ` comments below.
-#
-# Docker/Kind run rootless on a user socket, so point DOCKER_HOST at it unless
-# the caller already exported one.
-export DOCKER_HOST ?= unix:///run/user/1000/docker-me.sock
+# `make` lists every target with its description. The default model is the
+# smallest one in the manifest so a first run does not pull seven gigabytes.
 
-# Image tag used by the docker-build target (override with IMAGE=...).
-IMAGE ?= inferenceops/model-server:dev
+MODEL ?= qwen2.5-0.5b-instruct:q4_k_m
+CONFIG ?= configs/local-cpu.toml
+CORPUS ?= data/corpus.txt
+UV ?= uv
+SANDBOX ?= scripts/sandbox.sh
 
-# Ingress URL the locust load test targets (override with LOCUST_HOST=...).
-LOCUST_HOST ?= http://localhost:8080
-
-# `make` with no arguments shows the help.
 .DEFAULT_GOAL := help
 
-.PHONY: help run-local test lint typecheck coverage-gate docker-build ci-local \
-	deploy-local deploy-staging \
-	load-test-smoke load-test-spike load-test-soak load-test-stress load-test-locust \
-	deploy-canary promote rollback \
-	eval train llm-cpu-smoke canary-check batch
+.PHONY: help sync test lint typecheck prose check figures \
+	doctor models serve bench tune eval train kernel results \
+	sandbox-init sandbox-cpu sandbox-rocm sandbox-check sandbox-clean clean
 
-help: ## Show available targets and their descriptions
-	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_-]+:.*## / {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+help: ## List the targets
+	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-## Local development
-run-local: ## Run the model server locally on :8080 (uvicorn)
-	cd apps/model-server && PYTHONPATH=src uv run uvicorn inferenceops_model_server.server:app --host 0.0.0.0 --port 8080
+sync: ## Install the package and its development dependencies
+	$(UV) sync
 
-## Quality gates
-test: ## Run the test suite with pytest (with coverage)
-	uv run pytest
+test: ## Run the test suite
+	$(UV) run pytest
 
-lint: ## Lint the codebase with ruff
-	uv run ruff check .
+lint: ## Lint with ruff
+	$(UV) run ruff check .
 
-typecheck: ## Type-check the codebase with basedpyright
-	uv run basedpyright
+typecheck: ## Type check with basedpyright
+	$(UV) run basedpyright
 
-coverage-gate: ## Enforce per-package coverage gates (model-server >=80%, gateway >=70%)
-	uv run python scripts/coverage_gate.py
+prose: ## Check the house prose rules
+	$(UV) run python tools/check_prose.py
 
-docker-build: ## Build the model-server container image (rootless docker)
-	docker build -t $(IMAGE) -f apps/model-server/Dockerfile .
+check: lint typecheck test prose ## Run every gate
 
-ci-local: ## Run the full local CI pipeline (lint, typecheck, test, docker-build)
-	$(MAKE) lint typecheck test docker-build
+figures: ## Regenerate the Excalidraw scenes and their PNGs
+	$(UV) run python docs/figures/build.py
+	scripts/render_figures.sh
 
-## Deployment
-deploy-local: ## Deploy the full stack to a local kind cluster
-	scripts/deploy_local.sh
+doctor: ## Print host, tool, and device facts
+	$(UV) run blinding doctor
 
-deploy-staging: ## Deploy the platform to the staging environment
-	scripts/deploy_staging.sh
+models: ## List the pinned models
+	$(UV) run blinding models list
 
-## Load testing
-load-test-smoke: ## k6 smoke load test (minimal traffic, sanity; writes evals/reports/k6-smoke.json)
-	scripts/run_load_test.sh
+serve: ## Serve the default model (MODEL=... CONFIG=...)
+	$(UV) run blinding serve $(MODEL) --config $(CONFIG)
 
-load-test-spike: ## Spike load test — bounded curl burst that exercises HPA/KEDA scale-up (no k6 needed)
-	scripts/spike_load.sh
+bench: ## Benchmark the default model (MODEL=... CONFIG=...)
+	$(UV) run blinding bench $(MODEL) --config $(CONFIG)
 
-load-test-soak: ## k6 soak load test (sustained moderate traffic; writes evals/reports/k6-soak.json)
-	SCENARIO=soak scripts/run_load_test.sh
+tune: ## Sweep configurations for the default model
+	$(UV) run blinding tune $(MODEL)
 
-load-test-stress: ## k6 stress load test (push past capacity; writes evals/reports/k6-stress.json)
-	SCENARIO=stress scripts/run_load_test.sh
+eval: ## Score the prompt suite on the default model
+	$(UV) run blinding eval $(MODEL) --config $(CONFIG)
 
-load-test-locust: ## Locust headless load test (50 users/30s; writes evals/reports/locust CSV + HTML)
-	mkdir -p evals/reports
-	uv run --with locust locust -f load_tests/locust/locustfile.py --headless \
-		-u 50 -r 10 -t 30s --host $(LOCUST_HOST) \
-		--csv=evals/reports/locust --html=evals/reports/locust.html
+train: ## Fine-tune the tiny F32 model (CORPUS=...)
+	$(UV) run blinding train stories260k-f32 --corpus $(CORPUS)
 
-## Canary / release lifecycle
-deploy-canary: ## Deploy a canary model version (usage: make deploy-canary MODEL_VERSION=v4)
-	scripts/deploy_canary.sh $(MODEL_VERSION)
+kernel: ## Run the HIP copy and GEMM benchmark (GPU image only)
+	$(UV) run blinding kernel
 
-promote: ## Promote the canary to 100% (deliberate gated step)
-	scripts/promote.sh
+results: ## List recorded runs
+	$(UV) run blinding results list
 
-rollback: ## Roll back the canary to 0% (stable only)
-	scripts/rollback.sh
+sandbox-init: ## Create the workspace-local podman store
+	$(SANDBOX) init
 
-canary-check: ## Run the automated canary health check (p95/errors/eval, fail-closed)
-	scripts/canary_check.sh
+sandbox-cpu: ## Build the CPU image
+	$(SANDBOX) build --cpu
 
-## Modeling
-eval: ## Run all evaluation gates (accuracy, latency, regression)
-	scripts/run_evals.sh
+sandbox-rocm: ## Build the ROCm image
+	$(SANDBOX) build --rocm
 
-train: ## Train the fraud-detection model and write the artifact + metrics
-	uv run python models/training/train.py
+sandbox-check: ## Run every gate inside the CPU image
+	$(SANDBOX) run --cpu make check
 
-batch: ## Run a batch inference job
-	scripts/batch.sh
+sandbox-clean: ## Remove the workspace podman store and caches
+	$(SANDBOX) clean
 
-## LLM
-llm-cpu-smoke: ## Smoke-test the small CPU LLM end-to-end via the gateway
-	scripts/llm_cpu_smoke.sh
+clean: sandbox-clean ## Remove local caches
+	rm -rf .pytest_cache .ruff_cache .coverage htmlcov

@@ -1,0 +1,16 @@
+{"id":"repeat-blue-heron","prompt":"Repeat this exactly, with no other words: BLUE HERON","check":{"kind":"exact","value":"BLUE HERON"},"max_tokens":16}
+{"id":"repeat-number-sequence","prompt":"Repeat this exactly, with no other words: 7 13 21 34","check":{"kind":"exact","value":"7 13 21 34"},"max_tokens":16}
+{"id":"add-37-48","prompt":"What is 37 + 48? Reply with the number only.","check":{"kind":"exact","value":"85"},"max_tokens":8}
+{"id":"add-63-29","prompt":"What is 63 + 29? Reply with the number only.","check":{"kind":"exact","value":"92"},"max_tokens":8}
+{"id":"subtract-52-27","prompt":"What is 52 - 27? Reply with the number only.","check":{"kind":"exact","value":"25"},"max_tokens":8}
+{"id":"subtract-71-38","prompt":"What is 71 - 38? Reply with the number only.","check":{"kind":"exact","value":"33"},"max_tokens":8}
+{"id":"json-sum","prompt":"Add 12 and 30. Reply with JSON only, in the form {\"sum\": <number>}.","check":{"kind":"json","value":{"sum":42}},"max_tokens":24}
+{"id":"json-status","prompt":"Reply with JSON only: an object with the key status and the string value ok.","check":{"kind":"json","value":{"status":"ok"}},"max_tokens":24}
+{"id":"json-identity","prompt":"Reply with JSON only: an object with key name set to blinding and key version set to 0.1.0.","check":{"kind":"json","value":{"name":"blinding","version":"0.1.0"}},"max_tokens":32}
+{"id":"json-two-keys","prompt":"Reply with a JSON object that has two keys and any values. Use JSON syntax only.","check":{"kind":"json","value":{}},"max_tokens":48}
+{"id":"contains-kitten","prompt":"The young of a cat is called a kitten. Reply with that one word.","check":{"kind":"contains","value":"kitten"},"max_tokens":8}
+{"id":"contains-atlas","prompt":"Write one short sentence that includes the word atlas.","check":{"kind":"contains","value":"atlas"},"max_tokens":32}
+{"id":"contains-hello","prompt":"Reply with the word hello in lowercase letters.","check":{"kind":"contains","value":"hello"},"max_tokens":8}
+{"id":"regex-three-letters","prompt":"Reply with any three uppercase letters, and nothing else.","check":{"kind":"regex","value":"^\\s*[A-Z]{3}\\s*$"},"max_tokens":8}
+{"id":"regex-ready-period","prompt":"Reply with the word ready followed by a period, and nothing else.","check":{"kind":"regex","value":"^ready\\.$"},"max_tokens":8}
+{"id":"refusal-format","prompt":"I want you to predict tomorrow's lottery numbers. If you cannot do that, reply with a short refusal that begins with the words: I cannot","check":{"kind":"regex","value":"(?i)^\\s*i (cannot|can not|can't)"},"max_tokens":48}

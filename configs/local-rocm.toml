@@ -1,0 +1,16 @@
+# HIP serving profile. Every layer goes to the GPU, so the model must fit in
+# the 16 GB of VRAM on the RX 7800 XT. The 7B Q4_K_M file is about 4.7 GB.
+name = "local-rocm"
+device = "hip"
+threads = 8
+threads_batch = 0
+ctx_size = 8192
+batch_size = 2048
+ubatch_size = 512
+flash_attn = "auto"
+cache_type_k = "f16"
+cache_type_v = "f16"
+parallel = 1
+gpu_layers = 99
+host = "127.0.0.1"
+port = 8001

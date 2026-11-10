@@ -1,0 +1,44 @@
+# HIP image. The ROCm userspace comes from the pinned dev image, llama.cpp is
+# built for gfx1101, and the kernel benchmark is compiled with hipcc so it can
+# link rocBLAS at build time.
+FROM docker.io/rocm/dev-ubuntu-24.04:7.2.4-complete@sha256:92f309c51b52cef8762867848f1529dee821624f23cd5df38455e819538f762f
+
+ARG LLAMA_CPP_TAG=b10964
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        cmake \
+        curl \
+        git \
+        python3 \
+        python3-pip \
+        python3-venv \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN git clone --depth 1 --branch "${LLAMA_CPP_TAG}" \
+        https://github.com/ggml-org/llama.cpp /opt/llama.cpp
+
+RUN cmake -S /opt/llama.cpp -B /opt/llama.cpp/build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DGGML_HIP=ON \
+        -DAMDGPU_TARGETS=gfx1101 \
+        -DLLAMA_BUILD_TESTS=OFF \
+        -DLLAMA_BUILD_EXAMPLES=ON \
+        -DLLAMA_BUILD_SERVER=ON \
+        -DLLAMA_CURL=OFF \
+    && cmake --build /opt/llama.cpp/build --parallel "$(nproc)" \
+    && cmake --install /opt/llama.cpp/build \
+    && ldconfig
+
+COPY kernel/hip_bench.cpp /opt/blinding/hip_bench.cpp
+RUN hipcc -O3 -std=c++17 -o /usr/local/bin/blinding-hip-bench \
+        /opt/blinding/hip_bench.cpp -lrocblas
+
+RUN pip3 install --break-system-packages --no-cache-dir uv==0.13.7
+
+ENV PATH="/usr/local/bin:${PATH}"
+WORKDIR /work

@@ -133,7 +133,7 @@ copied from a config. `llama-server --list-devices` reports the RX 7800 XT.
 ## Tuning
 
 The CPU sweep ran six configurations with `llama-bench`, three repetitions
-each. `tg` is the raw generation loop; it is higher than the HTTP decode number
+each (run `20261110T232306Z`). `tg` is the raw generation loop; it is higher than the HTTP decode number
 because it excludes the server path.
 
 | quant | threads | pp tok/s | tg tok/s | file size |
@@ -147,7 +147,8 @@ because it excludes the server path.
 
 ![The CPU sweep picks q4_0 at 8 threads](docs/figures/tuning-frontier.png)
 
-The GPU sweep used the same three quantisations with 99 GPU layers requested:
+The GPU sweep used the same three quantisations with 99 GPU layers requested
+(run `20261110T232709Z`):
 
 | quant | threads | ngl | pp tok/s | tg tok/s | file size |
 |---|---|---|---|---|---|
@@ -182,13 +183,15 @@ the library's selected kernels, not a source-level autotune.
 
 ## Training and evaluation
 
-The tiny F32 model fine-tuned on 52 KB of Aesop for one epoch. Perplexity on the
-held-out text fell from 61.114 to 38.548 in 5.1 s. That proves the harness, not
+The tiny F32 model fine-tuned on 52 KB of Aesop for one epoch (run
+`20261110T232609Z`). Perplexity on the held-out text fell from 61.114 to 38.548
+in 5.1 s. That proves the harness, not
 the quality of a model. The same command accepts any F32 GGUF the machine can
 hold.
 
 The 16-prompt suite scored 10 of 16 on Qwen2.5-0.5B (62.5%, Wilson 38.6% to
-81.5%) and 15 of 16 on Qwen2.5-7B (93.8%, Wilson 71.7% to 98.9%). The suite is
+81.5%, run `20261110T232302Z`) and 15 of 16 on Qwen2.5-7B (93.8%, Wilson 71.7%
+to 98.9%, run `20261110T232701Z`). The suite is
 small and strict about format; a fenced JSON answer fails the JSON check.
 
 ## Serving behind a key
@@ -202,8 +205,8 @@ uv run blinding serve qwen2.5-0.5b-instruct:q4_k_m \
 The gateway answers `GET /healthz` and `GET /metrics` without a key. Everything
 else needs `X-API-Key`. A missing or wrong key returns 401, a burst over the
 token bucket returns 429 with `Retry-After`, and an unreachable upstream returns
-502 or 504. In the tested run, `/healthz` returned 200, `/v1/models` returned
-401 without a key and 200 with one, and a chat completion returned 200. A
+502 or 504. In the tested run (`20261110T232852Z`), `/healthz` returned 200, `/v1/models`
+returned 401 without a key and 200 with one, and a chat completion returned 200. A
 SIGTERM to the CLI stopped the gateway and the server and wrote the run record.
 
 ## Limits

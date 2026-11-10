@@ -119,18 +119,56 @@ sandbox is a rootless podman container with a read-only root, a workspace-only
 bind mount, a workspace podman store, and only `/dev/kfd` and the render node
 passed through. It is removed after the final check.
 
+## Final verification
+
+The sandbox gate passed. Rootless podman ran with its store under
+`.sandbox/containers`, overlay on the workspace, a read-only container root, and
+only `/dev/kfd` and `/dev/dri/renderD128` passed through. `rocminfo` reported
+gfx1101 and ROCm 7.2.4 on the RX 7800 XT.
+
+The suite in the CPU image collected and passed 138 tests. `ruff`,
+`basedpyright`, and `tools/check_prose.py` reported no errors. The pytest
+`--collect-only` run is the source for the count.
+
+Measured results in the README:
+
+- Qwen2.5-0.5B on the CPU reached 60.3 tok/s at one request and 77.2 tok/s at
+  four queued requests, both at eight threads. Sixteen threads fell to 16.8
+  tok/s, so the shipped CPU config uses eight.
+- Qwen2.5-7B on the GPU with four slots reached 93.2 tok/s at one request,
+  205.6 tok/s at four, and 210.9 tok/s at eight while TTFT grew from 31 ms to
+  1.3 s.
+- The CPU sweep named q4_0 at eight threads for both generation and prompt
+  processing. The GPU sweep named q4_0 at 302.4 tok/s, with the three quants
+  inside a few tok/s of each other.
+- The HIP copy kernel peaked at 465.9 GB/s with 256-thread blocks. The best
+  rocBLAS point was 58,976.8 GFLOPS for fp16 at 4096 nn and 12,893.1 GFLOPS for
+  fp32 at 4096 nt.
+- The tiny F32 model fine-tuned from perplexity 61.114 to 38.548 in 5.1 s.
+- The prompt suite scored 10 of 16 on the 0.5B model and 15 of 16 on the 7B.
+- The gateway returned 401 without a key, 401 with a wrong key, 200 with the
+  configured key, and 200 for a chat completion. SIGTERM stopped the CLI, the
+  gateway, and llama-server, and left the run record.
+
+All ten final run records carry `git.dirty: false` at commit `a50a4ad`.
+
 ## What is still not measured
 
-The GPU rows depend on the ROCm container opening the RX 7800 XT. If the device
-gate fails, Blinding reports CPU only and the GPU code is removed rather than
-described. Fine-tuning is llama.cpp's work-in-progress example on the 1.2 MB test
-model. That proves the harness, not the quality of a model. No cloud deployment
-is claimed, because none was tested.
+GPU fine-tuning is not measured; the training path is CPU only. Source-level
+kernel autotuning is not measured; the kernel command reports the HIP copy
+kernel and the rocBLAS library's selected kernels. No cloud deployment is
+claimed, because none was tested. The prompt suite has sixteen cases, so the
+Wilson interval is wide. The pinned llama.cpp build does not print an offload
+line in the server log, so the GPU record names the device and the throughput
+rather than a layer count.
 
 ## Remaining risks
 
-The CPU numbers move with other work on the host. Load average is recorded and
-every tuning candidate repeats, but the README is a snapshot, not an SLO.
-llama.cpp changes its flags between releases, so the pinned build is part of the
-record. The upstream finetune example may stop working; the command will be cut
-if it does.
+The CPU numbers move with other work on the host. The eight-thread run's first
+concurrency level measured 60.3 tok/s while the next level measured 73.6 tok/s,
+a reminder that the first level runs while the host is still settling. Load
+average is in every record and every tuning candidate repeats, but the README is
+a snapshot, not an SLO. llama.cpp changes its flags between releases, so the
+pinned build is part of the record. The upstream finetune example may stop
+working; the command will be cut if it does.
+

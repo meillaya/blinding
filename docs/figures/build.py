@@ -195,6 +195,21 @@ class Scene:
             width=label_width,
         )
 
+    def bar(self, element_id: str, x: float, y: float, width: float) -> None:
+        """Horizontal measured bar without an arrowhead."""
+        element = self._base(element_id, "line", x, y, width, 1)
+        element.update(
+            {
+                "strokeColor": PALETTE["analysis"][0],
+                "points": [[0, 0], [width, 0]],
+                "startBinding": None,
+                "endBinding": None,
+                "startArrowhead": None,
+                "endArrowhead": None,
+            }
+        )
+        self.elements.append(element)
+
     def tick(self, element_id: str, x: float, y: float, height: float = 18.0) -> None:
         element = self._base(element_id, "line", x, y, 1, height)
         element.update(
@@ -261,9 +276,9 @@ def architecture(measured: dict[str, Any]) -> Scene:
     scene.arrow("a-load", 630, 430, 0, 85, "loads", "model")
     scene.arrow("a-bench", 320, 340, 150, 30, "requests", "analysis")
     scene.arrow("a-tune", 320, 500, 150, -80, "restarts", "analysis")
-    scene.arrow("a-train", 320, 660, 150, 20, "reads", "model")
+    scene.arrow("a-train", 320, 665, 160, -100, "reads", "model")
     scene.arrow("a-finetuned", 780, 505, 110, 0, "writes", "model")
-    scene.arrow("a-kernel", 1110, 710, 110, 60, "runs on", "hip")
+    scene.arrow("a-kernel", 1050, 710, 0, 70, "runs on", "hip")
     scene.text(
         "note",
         60,
@@ -322,7 +337,7 @@ def methodology(measured: dict[str, Any]) -> Scene:
         760,
         1300,
         80,
-        "run.json carries the host, device, model hash, config, and validity",
+        "run.json: host, device, hash, config, verdict",
         "neutral",
     )
     return scene
@@ -336,32 +351,46 @@ def tuning(measured: dict[str, Any]) -> Scene:
         "title",
         MARGIN,
         MARGIN,
-        "The sweep recommends the measured knee, not the loudest number",
+        "The CPU sweep picks q4_0 at 8 threads",
         TITLE_SIZE,
     )
-    scene.box("grid", 60, 160, 260, 100, "grid\nquant x threads x ngl", "neutral")
-    scene.text("table", 60, 300, "candidate          pp tok/s   tg tok/s", NOTE_SIZE, colour=MUTED)
+    scene.box("grid", 60, 140, 260, 90, "grid\nquant x threads", "neutral")
+    scene.text("header", 60, 270, "config            pp tok/s   tg tok/s", NOTE_SIZE, colour=MUTED)
     max_tg = max(float(row["tg"]) for row in rows)
-    y = 340
+    y = 310
     for index, row in enumerate(rows):
         label = f"{row['quant']} t{row['threads']} ngl{row['ngl']}"
-        scene.text(f"row-{index}", 60, y, label, NOTE_SIZE, width=290)
-        scene.text(f"pp-{index}", 360, y, f"{row['pp']:.0f}", NOTE_SIZE, width=80)
-        scene.text(f"tg-{index}", 460, y, f"{row['tg']:.0f}", NOTE_SIZE, width=80)
-        width = 240.0 * float(row["tg"]) / max_tg if max_tg > 0 else 0.0
-        scene.tick(f"bar-{index}", 560, y + 2, height=14)
+        scene.text(f"row-{index}", 60, y, label, NOTE_SIZE, width=270)
+        scene.text(f"pp-{index}", 380, y, f"{row['pp']:.0f}", NOTE_SIZE, width=70)
+        scene.text(f"tg-{index}", 470, y, f"{row['tg']:.0f}", NOTE_SIZE, width=70)
+        width = 190.0 * float(row["tg"]) / max_tg if max_tg > 0 else 0.0
         if width > 0:
-            scene.arrow(f"barline-{index}", 560, y + 10, width, 0, "", "analysis", label_offset=0)
-        y += 46
-    scene.arrow("a-grid", 320, 210, 70, 30, "measure", "neutral")
+            scene.bar(f"bar-{index}", 560, y + 10, width)
+        y += 44
+    interactive = str(recommendation["interactive"]).split(",")
+    prompt_heavy = str(recommendation["prompt_heavy"]).split(",")
     scene.box(
-        "interactive", 760, 520, 320, 120, f"interactive\n{recommendation['interactive']}", "hip"
+        "interactive",
+        800,
+        300,
+        300,
+        120,
+        f"interactive\n{interactive[0]} + {interactive[1].strip()}\n{interactive[2].strip()}",
+        "hip",
+        size=20,
     )
-    scene.box("batch", 1120, 520, 320, 120, f"batch\n{recommendation['batch']}", "analysis")
-    scene.arrow("a-recommend", 760, 640, 0, 60, "pareto", "neutral")
     scene.box(
-        "evidence", 760, 760, 680, 80, "llama-bench means and stddev, three repetitions", "neutral"
+        "batch",
+        800,
+        460,
+        300,
+        120,
+        f"batch\n{prompt_heavy[0]} + {prompt_heavy[1].strip()}\n{prompt_heavy[2].strip()}",
+        "analysis",
+        size=20,
     )
+    scene.arrow("a-pareto", 750, 340, 40, -20, "pareto", "neutral")
+    scene.box("evidence", 800, 640, 300, 80, "three runs, stddev", "neutral")
     scene.text(
         "note",
         60,
@@ -370,7 +399,7 @@ def tuning(measured: dict[str, Any]) -> Scene:
         "Otherwise both are named.",
         NOTE_SIZE,
         colour=MUTED,
-        width=660,
+        width=700,
     )
     return scene
 

@@ -1,0 +1,29 @@
+{
+  "gpu_name": "RX 7800 XT (gfx1101)",
+  "cpu": {
+    "model": "Qwen2.5-0.5B Q4_K_M",
+    "run": "20261110T231626Z",
+    "ttft_ms": 39.5,
+    "itl_ms": 13.8,
+    "tok_s": 60.3
+  },
+  "gpu": {
+    "model": "Qwen2.5-7B Q4_K_M",
+    "run": "20261110T232623Z",
+    "ttft_ms": 31.3,
+    "itl_ms": 10.5,
+    "tok_s": 93.2
+  },
+  "tune": [
+    {"quant": "q4_0", "threads": 8, "ngl": 0, "pp": 734.8, "tg": 91.0},
+    {"quant": "q4_0", "threads": 16, "ngl": 0, "pp": 363.4, "tg": 15.6},
+    {"quant": "q4_k_m", "threads": 8, "ngl": 0, "pp": 418.9, "tg": 85.2},
+    {"quant": "q4_k_m", "threads": 16, "ngl": 0, "pp": 266.7, "tg": 13.8},
+    {"quant": "q8_0", "threads": 8, "ngl": 0, "pp": 506.2, "tg": 59.7},
+    {"quant": "q8_0", "threads": 16, "ngl": 0, "pp": 155.0, "tg": 7.9}
+  ],
+  "recommend": {
+    "interactive": "q4_0, 8 threads, 91 tok/s",
+    "prompt_heavy": "q4_0, 8 threads, 735 pp tok/s"
+  }
+}

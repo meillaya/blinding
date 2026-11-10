@@ -1,0 +1,230 @@
+{
+  "argv": [
+    "/home/mei/Documents/inference-ops/.sandbox/venv-cpu/bin/blinding",
+    "bench",
+    "qwen2.5-0.5b-instruct:q4_k_m",
+    "--config",
+    "configs/local-cpu.toml",
+    "--threads",
+    "16",
+    "--concurrency",
+    "1",
+    "2",
+    "4",
+    "--requests",
+    "8",
+    "--warmup",
+    "2",
+    "--prompt-tokens",
+    "256",
+    "--max-tokens",
+    "128",
+    "--timeout",
+    "300"
+  ],
+  "artifacts": {
+    "report": "report.md",
+    "requests": "requests.csv"
+  },
+  "blinding_version": "0.1.0",
+  "command": "bench",
+  "config": {
+    "batch_size": 512,
+    "cache_type_k": "f16",
+    "cache_type_v": "f16",
+    "ctx_size": 4096,
+    "device": "cpu",
+    "extra_args": [],
+    "flash_attn": "auto",
+    "gpu_layers": 0,
+    "host": "127.0.0.1",
+    "name": "local-cpu",
+    "parallel": 1,
+    "port": 8001,
+    "threads": 16,
+    "threads_batch": 0,
+    "ubatch_size": 128
+  },
+  "devices": [],
+  "duration_s": 339.842,
+  "git": {
+    "commit": "a50a4ad16394173d5ee6603dbe9f97b1b4ead68e",
+    "dirty": false
+  },
+  "host": {
+    "cpu_model": "AMD Ryzen 7 5700X 8-Core Processor",
+    "hostname": "massive",
+    "kernel": "7.3.3-1-cachyos",
+    "load1": 26.228515625,
+    "load15": 18.5029296875,
+    "load5": 23.55078125,
+    "memory_gib": 62.7,
+    "nproc": 16,
+    "platform": "Linux-7.3.3-1-cachyos-x86_64-with-glibc2.36"
+  },
+  "metrics": {
+    "levels": [
+      {
+        "completion_tokens": 1024,
+        "concurrency": 1,
+        "decode_tokens_s": 16.823,
+        "error_rate": 0.0,
+        "errors": 0,
+        "itl_ms": {
+          "count": 1016,
+          "max": 994.1554149991134,
+          "mean": 59.31818200592465,
+          "min": 11.407012993004173,
+          "p50": 31.170389498583972,
+          "p95": 244.98852099350188,
+          "p99": 554.3472447927343
+        },
+        "latency_ms": {
+          "count": 8,
+          "max": 12688.102708998485,
+          "mean": 7608.4337565007445,
+          "min": 4639.832982997177,
+          "p50": 5843.3954490028555,
+          "p95": 12646.165946648398,
+          "p99": 12679.715356528468
+        },
+        "ok": 8,
+        "request_rate": 0.131,
+        "requests": 8,
+        "ttft_ms": {
+          "count": 8,
+          "max": 192.84394299029373,
+          "mean": 74.30648612353252,
+          "min": 40.937703000963666,
+          "p50": 56.11559750104789,
+          "p95": 159.22313689370634,
+          "p99": 186.11978177097623
+        },
+        "wall_s": 60.868
+      },
+      {
+        "completion_tokens": 1024,
+        "concurrency": 2,
+        "decode_tokens_s": 8.884,
+        "error_rate": 0.0,
+        "errors": 0,
+        "itl_ms": {
+          "count": 1016,
+          "max": 1212.1071409928845,
+          "mean": 111.18532737599185,
+          "min": 14.340390989673324,
+          "p50": 30.886428998201154,
+          "p95": 623.923874249158,
+          "p99": 1031.7925116985864
+        },
+        "latency_ms": {
+          "count": 8,
+          "max": 68060.00508500438,
+          "mean": 27113.67853874799,
+          "min": 8616.929880998214,
+          "p50": 14064.355356997112,
+          "p95": 64022.10152125262,
+          "p99": 67252.42437225403
+        },
+        "ok": 8,
+        "request_rate": 0.069,
+        "requests": 8,
+        "ttft_ms": {
+          "count": 8,
+          "max": 49851.47966600198,
+          "mean": 12992.466405123196,
+          "min": 68.07988499349449,
+          "p50": 7694.857459500781,
+          "p95": 39162.18357894757,
+          "p99": 47713.62044859109
+        },
+        "wall_s": 115.265
+      },
+      {
+        "completion_tokens": 1024,
+        "concurrency": 4,
+        "decode_tokens_s": 7.601,
+        "error_rate": 0.0,
+        "errors": 0,
+        "itl_ms": {
+          "count": 1016,
+          "max": 1086.493833005079,
+          "mean": 131.0163271820612,
+          "min": 15.517688996624202,
+          "p50": 34.75160200468963,
+          "p95": 711.6342557528696,
+          "p99": 1045.6594592484182
+        },
+        "latency_ms": {
+          "count": 8,
+          "max": 91547.45152599935,
+          "mean": 55076.42456262511,
+          "min": 12947.748405989842,
+          "p50": 53155.92275850213,
+          "p95": 90576.63959159836,
+          "p99": 91353.28913911915
+        },
+        "ok": 8,
+        "request_rate": 0.059,
+        "requests": 8,
+        "ttft_ms": {
+          "count": 8,
+          "max": 76536.0497799993,
+          "mean": 38436.4075021258,
+          "min": 187.44654599868227,
+          "p50": 34001.339214002655,
+          "p95": 76136.25547669872,
+          "p99": 76456.09091933919
+        },
+        "wall_s": 134.723
+      }
+    ],
+    "offload": null,
+    "startup_s": 0.91
+  },
+  "model": {
+    "context": 32768,
+    "files": [
+      {
+        "file": "qwen2.5-0.5b-instruct-q4_k_m.gguf",
+        "path": "/home/mei/Documents/inference-ops/.sandbox/cache/models/qwen2.5-0.5b-instruct/q4_k_m/qwen2.5-0.5b-instruct-q4_k_m.gguf",
+        "sha256": "74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db"
+      }
+    ],
+    "id": "qwen2.5-0.5b-instruct",
+    "quant": "q4_k_m",
+    "revision": "9217f5db79a29953eb74d5343926648285ec7e67"
+  },
+  "schema_version": 1,
+  "started_at": "2026-11-10T23:17:20Z",
+  "tools": {
+    "paths": {
+      "llama_bench": "/usr/local/bin/llama-bench",
+      "llama_finetune": "/usr/local/bin/llama-finetune",
+      "llama_perplexity": "/usr/local/bin/llama-perplexity",
+      "llama_server": "/usr/local/bin/llama-server"
+    },
+    "versions": {
+      "llama-bench": "",
+      "llama-finetune": "version: 0.4.1-dev (build 1, commit b29c606)",
+      "llama-perplexity": "version: 0.4.1-dev (build 1, commit b29c606)",
+      "llama-server": "version: 0.4.1-dev (build 1, commit b29c606)"
+    }
+  },
+  "validity": {
+    "reasons": [],
+    "valid": true
+  },
+  "workload": {
+    "base_url": "http://127.0.0.1:44921",
+    "concurrency": [
+      1,
+      2,
+      4
+    ],
+    "max_tokens": 128,
+    "prompt_tokens": 295,
+    "requests_per_level": 8,
+    "temperature": 0.0
+  }
+}

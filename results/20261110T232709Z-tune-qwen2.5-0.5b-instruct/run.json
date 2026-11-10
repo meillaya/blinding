@@ -1,0 +1,139 @@
+{
+  "argv": [
+    "/home/mei/Documents/inference-ops/.sandbox/venv-rocm/bin/blinding",
+    "tune",
+    "qwen2.5-0.5b-instruct",
+    "--device",
+    "hip",
+    "--threads",
+    "8",
+    "--quants",
+    "q4_0",
+    "q4_k_m",
+    "q8_0"
+  ],
+  "artifacts": {
+    "report": "report.md"
+  },
+  "blinding_version": "0.1.0",
+  "command": "tune",
+  "config": {
+    "device": "hip"
+  },
+  "devices": [
+    {
+      "backend": "ROCm0",
+      "gfx": "gfx1101",
+      "memory_mib": 16142,
+      "name": "AMD Radeon RX 7800 XT"
+    }
+  ],
+  "duration_s": 7.646,
+  "git": {
+    "commit": "a50a4ad16394173d5ee6603dbe9f97b1b4ead68e",
+    "dirty": false
+  },
+  "host": {
+    "cpu_model": "AMD Ryzen 7 5700X 8-Core Processor",
+    "hostname": "massive",
+    "kernel": "7.3.3-1-cachyos",
+    "load1": 12.74853515625,
+    "load15": 18.70947265625,
+    "load5": 20.591796875,
+    "memory_gib": 62.7,
+    "nproc": 16,
+    "platform": "Linux-7.3.3-1-cachyos-x86_64-with-glibc2.39"
+  },
+  "metrics": {
+    "recommendation": {
+      "interactive": {
+        "gpu_layers": 99,
+        "mean": 302.44,
+        "metric": "tg_ts",
+        "quant": "q4_0",
+        "stddev": 4.003,
+        "threads": 8
+      },
+      "interactive_runner_up": null,
+      "noise_tie": false,
+      "prompt_heavy": {
+        "gpu_layers": 99,
+        "mean": 12413.976,
+        "metric": "pp_ts",
+        "quant": "q4_0",
+        "stddev": 64.529,
+        "threads": 8
+      },
+      "prompt_heavy_runner_up": null
+    },
+    "rows": [
+      {
+        "gpu_layers": 99,
+        "model_size": 422782464,
+        "pp_stddev": 64.529,
+        "pp_ts": 12413.976,
+        "quant": "q4_0",
+        "test": "pp512+tg128",
+        "tg_stddev": 4.003,
+        "tg_ts": 302.44,
+        "threads": 8
+      },
+      {
+        "gpu_layers": 99,
+        "model_size": 485452288,
+        "pp_stddev": 64.086,
+        "pp_ts": 10923.27,
+        "quant": "q4_k_m",
+        "test": "pp512+tg128",
+        "tg_stddev": 1.365,
+        "tg_ts": 291.541,
+        "threads": 8
+      },
+      {
+        "gpu_layers": 99,
+        "model_size": 669763072,
+        "pp_stddev": 45.794,
+        "pp_ts": 11602.779,
+        "quant": "q8_0",
+        "test": "pp512+tg128",
+        "tg_stddev": 6.932,
+        "tg_ts": 291.872,
+        "threads": 8
+      }
+    ]
+  },
+  "model": {
+    "id": "qwen2.5-0.5b-instruct",
+    "quants": [
+      "q4_0",
+      "q4_k_m",
+      "q8_0"
+    ]
+  },
+  "schema_version": 1,
+  "started_at": "2026-11-10T23:27:09Z",
+  "tools": {
+    "paths": {
+      "llama_bench": "/usr/local/bin/llama-bench",
+      "llama_finetune": "/usr/local/bin/llama-finetune",
+      "llama_perplexity": "/usr/local/bin/llama-perplexity",
+      "llama_server": "/usr/local/bin/llama-server"
+    },
+    "versions": {
+      "llama-bench": "",
+      "llama-finetune": "version: 0.4.1-dev (build 1, commit b29c606)",
+      "llama-perplexity": "version: 0.4.1-dev (build 1, commit b29c606)",
+      "llama-server": "version: 0.4.1-dev (build 1, commit b29c606)"
+    }
+  },
+  "validity": {
+    "reasons": [],
+    "valid": true
+  },
+  "workload": {
+    "candidates": 3,
+    "pp": 512,
+    "reps": 3,
+    "tg": 128
+  }
+}

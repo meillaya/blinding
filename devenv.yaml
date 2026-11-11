@@ -1,0 +1,18 @@
+# Input configuration for devenv. The shell itself is declared in devenv.nix.
+#
+# nixpkgs is pinned to the rolling branch the other house projects use.
+# languages.python.version needs the nixpkgs-python input. That input follows
+# the pinned nixpkgs, so the shell fetches one nixpkgs and one Python.
+
+require_version: ">=2.1"
+
+inputs:
+  nixpkgs:
+    url: github:cachix/devenv-nixpkgs/rolling
+  nixpkgs-python:
+    url: github:cachix/nixpkgs-python
+    inputs:
+      nixpkgs:
+        follows: nixpkgs
+
+shell: bash

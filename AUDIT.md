@@ -155,7 +155,7 @@ All ten final run records carry `git.dirty: false` at commit `a50a4ad`.
 ## What is still not measured
 
 GPU fine-tuning is not measured; the training path is CPU only. Source-level
-kernel autotuning is not measured; the kernel command reports the HIP copy
+kernel autotuning is not implemented; the kernel command measures the HIP copy
 kernel and the rocBLAS library's selected kernels. No cloud deployment is
 claimed, because none was tested. The prompt suite has sixteen cases, so the
 Wilson interval is wide. The pinned llama.cpp build does not print an offload

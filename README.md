@@ -34,6 +34,9 @@ If Python 3.12, uv, and llama.cpp are already on the machine, `uv sync` and
 `uv run blinding ...` work without the container. The model cache then defaults
 to `~/.cache/blinding`.
 
+For host-side work, `devenv shell` provides Python 3.12, uv, and podman from
+`devenv.nix`. llama.cpp and the GPU toolchain come from the container images.
+
 For the GPU, build the ROCm image and use the HIP config:
 
 ```bash
@@ -178,8 +181,9 @@ and shows the copy blocks.
 | gemm fp32 | 2048 nt | 11,672.9 GFLOPS |
 
 The full 20-point table is in `results/20261110T232718Z-kernel-hip/report.md`.
-The copy kernel peaks at 466 GB/s with 256-thread blocks. The GEMM numbers are
-the library's selected kernels, not a source-level autotune.
+The copy kernel peaks at 466 GB/s with 256-thread blocks. The kernel command
+measures that copy kernel and the GEMM kernels the rocBLAS library selects for
+each shape. Source-level kernel autotuning is not implemented.
 
 ## Training and evaluation
 

@@ -1,0 +1,4 @@
+# GitHub's language bar counts a language by the tracked bytes that Linguist
+# detects. The shell wrappers under scripts/ are tooling around the Python
+# package, so keep them out of that count.
+*.sh linguist-detectable=false

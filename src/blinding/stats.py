@@ -233,3 +233,38 @@ def cluster_bootstrap_delta_ci(
         return DeltaInterval(point, None, None, resamples, confidence)
     low, high = _percentile_band(deltas, confidence)
     return DeltaInterval(point, low, high, resamples, confidence)
+
+
+def bootstrap_mean_delta_ci(
+    baseline: Sequence[float],
+    candidate: Sequence[float],
+    resamples: int = DEFAULT_RESAMPLES,
+    confidence: float = DEFAULT_CONFIDENCE,
+    seed: int = DEFAULT_SEED,
+) -> DeltaInterval:
+    """Relative delta of the mean, resampling both sides independently.
+
+    Kernel rows carry one sample per timed iteration, so the mean is the
+    reported statistic and the resampling unit is the iteration.
+    """
+    if not baseline or not candidate:
+        raise ValueError("bootstrap needs at least one value on each side")
+    _check_bootstrap(resamples, confidence)
+    base = tuple(baseline)
+    cand = tuple(candidate)
+    point = _relative_change(sum(base) / len(base), sum(cand) / len(cand))
+    rng = random.Random(seed)
+    deltas: list[float] = []
+    for _ in range(resamples):
+        base_sample = _resample(base, rng)
+        cand_sample = _resample(cand, rng)
+        change = _relative_change(
+            sum(base_sample) / len(base_sample),
+            sum(cand_sample) / len(cand_sample),
+        )
+        if change is not None:
+            deltas.append(change)
+    if len(deltas) * 2 < resamples:
+        return DeltaInterval(point, None, None, resamples, confidence)
+    low, high = _percentile_band(deltas, confidence)
+    return DeltaInterval(point, low, high, resamples, confidence)

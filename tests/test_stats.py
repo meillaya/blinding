@@ -87,3 +87,12 @@ def test_bootstrap_rejects_empty_input() -> None:
         stats.bootstrap_percentile_ci([], 50.0)
     with pytest.raises(ValueError):
         stats.bootstrap_delta_ci([], [1.0], 50.0)
+
+
+def test_bootstrap_mean_delta_reports_a_drop() -> None:
+    """Kernel iteration samples use the mean, and the interval follows it."""
+    base = [400.0, 401.0, 399.0, 400.5, 399.5, 400.0, 400.2]
+    candidate = [300.0, 301.0, 299.0, 300.5, 299.5, 300.0, 300.2]
+    delta = stats.bootstrap_mean_delta_ci(base, candidate, resamples=500, seed=3)
+    assert delta.point_pct is not None and delta.point_pct < -20.0
+    assert delta.high_pct is not None and delta.high_pct < 0.0

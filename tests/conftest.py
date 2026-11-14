@@ -105,3 +105,45 @@ def write_bench_run(
 def bench_run_factory() -> Callable[..., Path]:
     """A callable that writes a synthetic bench run, for compare tests."""
     return write_bench_run
+
+
+def write_kernel_run(
+    root: Path,
+    name: str,
+    *,
+    copy: list[dict[str, Any]],
+    gemm: list[dict[str, Any]] | None = None,
+    valid: bool = True,
+    host: dict[str, Any] | None = None,
+    devices: list[dict[str, Any]] | None = None,
+    blinding_version: str = "0.3.0",
+    command: str = "kernel",
+) -> Path:
+    """Create a synthetic kernel run directory with samples on each row."""
+    run_dir = root / name
+    run_dir.mkdir(parents=True)
+    record = {
+        "schema_version": 2,
+        "blinding_version": blinding_version,
+        "command": command,
+        "started_at": "2026-11-14T12:00:00Z",
+        "argv": ["blinding", "kernel"],
+        "git": {"commit": "a" * 40, "dirty": False},
+        "host": host or {"hostname": "test-host", "cpu_model": "test-cpu"},
+        "devices": devices
+        if devices is not None
+        else [{"backend": "ROCm0", "name": "RX 7800 XT", "gfx": "gfx1101"}],
+        "model": None,
+        "config": {"blocks": [128, 256], "sizes": [1024]},
+        "tools": {"versions": {}},
+        "validity": {"valid": valid, "reasons": [] if valid else ["device error"]},
+        "metrics": {"copy": copy, "gemm": gemm or []},
+    }
+    (run_dir / "run.json").write_text(json.dumps(record), encoding="utf-8")
+    return run_dir
+
+
+@pytest.fixture
+def kernel_run_factory() -> Callable[..., Path]:
+    """A callable that writes a synthetic kernel run, for compare tests."""
+    return write_kernel_run

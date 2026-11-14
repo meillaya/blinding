@@ -113,6 +113,46 @@ class MetricResult:
 
 
 @dataclass(frozen=True, slots=True)
+class RowResult:
+    """One kernel row compared across the two runs."""
+
+    benchmark: str
+    detail: str
+    unit: str
+    baseline: float | None
+    candidate: float | None
+    delta_pct: float | None
+    low_pct: float | None
+    high_pct: float | None
+    n_baseline: int
+    n_candidate: int
+    source: str
+    verdict: str
+    reason: str = ""
+
+    @property
+    def label(self) -> str:
+        return f"{self.benchmark} {self.detail}"
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "benchmark": self.benchmark,
+            "detail": self.detail,
+            "unit": self.unit,
+            "baseline": _round(self.baseline),
+            "candidate": _round(self.candidate),
+            "delta_pct": _round(self.delta_pct),
+            "ci_low_pct": _round(self.low_pct),
+            "ci_high_pct": _round(self.high_pct),
+            "n_baseline": self.n_baseline,
+            "n_candidate": self.n_candidate,
+            "source": self.source,
+            "verdict": self.verdict,
+            "reason": self.reason,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class LevelResult:
     """All metric results for one shared concurrency level."""
 
@@ -181,20 +221,27 @@ class CompareReport:
     skipped_levels: tuple[int, ...]
     options: CompareOptions
     command: str
+    rows: tuple[RowResult, ...] = ()
+    skipped_rows: tuple[str, ...] = ()
 
     def metrics(self) -> list[MetricResult]:
         return [metric for level in self.levels for metric in level.metrics]
 
+    def verdicts(self) -> list[str]:
+        return [metric.verdict for metric in self.metrics()] + [
+            row.verdict for row in self.rows
+        ]
+
     def counts(self) -> dict[str, int]:
         counts: dict[str, int] = {}
-        for metric in self.metrics():
-            counts[metric.verdict] = counts.get(metric.verdict, 0) + 1
+        for verdict in self.verdicts():
+            counts[verdict] = counts.get(verdict, 0) + 1
         return counts
 
     def overall_verdict(self) -> str:
         if not self.compatibility.ok:
             return "invalid"
-        verdicts = [metric.verdict for metric in self.metrics()]
+        verdicts = self.verdicts()
         if "regressed" in verdicts:
             return "regressed"
         if "point_regressed" in verdicts:
@@ -235,6 +282,8 @@ class CompareReport:
                 for level in self.levels
             ],
             "skipped_levels": list(self.skipped_levels),
+            "rows": [row.as_dict() for row in self.rows],
+            "skipped_rows": list(self.skipped_rows),
             "summary": {
                 "verdict": self.overall_verdict(),
                 "counts": self.counts(),
@@ -773,20 +822,178 @@ def _level_number(
     return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
 
 
+KERNEL_MIN_SAMPLES = 4
+
+
+def _row_samples(entry: dict[str, Any]) -> list[float]:
+    raw = entry.get("samples")
+    if not isinstance(raw, list):
+        return []
+    values: list[float] = []
+    for item in raw:
+        if isinstance(item, (int, float)) and not isinstance(item, bool) and item > 0.0:
+            values.append(float(item))
+    return values
+
+
+def _kernel_rows(run: RunData) -> dict[str, dict[str, Any]]:
+    metrics = run.record.get("metrics")
+    if not isinstance(metrics, dict):
+        raise InvalidMeasurement(f"{run.run_id}: the record has no metrics object")
+    rows: dict[str, dict[str, Any]] = {}
+    copy_rows = metrics.get("copy", [])
+    if isinstance(copy_rows, list):
+        for entry in copy_rows:
+            if not isinstance(entry, dict):
+                continue
+            block = entry.get("block")
+            gbps = entry.get("gbps")
+            if isinstance(block, bool) or not isinstance(block, int):
+                continue
+            if not isinstance(gbps, (int, float)) or isinstance(gbps, bool):
+                continue
+            variant = str(entry.get("variant", ""))
+            detail = f"{variant} block {block}" if variant else f"block {block}"
+            rows[f"copy {detail}"] = {
+                "benchmark": "copy",
+                "detail": detail,
+                "unit": "GB/s",
+                "value": float(gbps),
+                "samples": _row_samples(entry),
+            }
+    gemm_rows = metrics.get("gemm", [])
+    if isinstance(gemm_rows, list):
+        for entry in gemm_rows:
+            if not isinstance(entry, dict):
+                continue
+            dtype = entry.get("dtype")
+            layout = entry.get("layout")
+            size = entry.get("size")
+            gflops = entry.get("gflops")
+            if not isinstance(dtype, str) or not isinstance(layout, str):
+                continue
+            if isinstance(size, bool) or not isinstance(size, int):
+                continue
+            if not isinstance(gflops, (int, float)) or isinstance(gflops, bool):
+                continue
+            detail = f"{dtype} {layout} {size}"
+            rows[f"gemm {detail}"] = {
+                "benchmark": "gemm",
+                "detail": detail,
+                "unit": "GFLOPS",
+                "value": float(gflops),
+                "samples": _row_samples(entry),
+            }
+    return rows
+
+
+def _compare_kernel(
+    baseline: RunData, candidate: RunData, options: CompareOptions
+) -> tuple[tuple[RowResult, ...], tuple[str, ...]]:
+    base_rows = _kernel_rows(baseline)
+    cand_rows = _kernel_rows(candidate)
+    shared = sorted(set(base_rows) & set(cand_rows))
+    if not shared:
+        raise InvalidMeasurement("the kernel runs share no benchmark row")
+    results: list[RowResult] = []
+    for key in shared:
+        base = base_rows[key]
+        cand = cand_rows[key]
+        base_samples = base["samples"]
+        cand_samples = cand["samples"]
+        if base_samples and cand_samples:
+            delta = stats.bootstrap_mean_delta_ci(
+                base_samples,
+                cand_samples,
+                resamples=options.resamples,
+                confidence=options.confidence,
+                seed=options.seed,
+            )
+            enough = (
+                len(base_samples) >= KERNEL_MIN_SAMPLES
+                and len(cand_samples) >= KERNEL_MIN_SAMPLES
+            )
+            verdict = (
+                _interval_verdict(
+                    delta.point_pct,
+                    delta.low_pct,
+                    delta.high_pct,
+                    HIGHER_IS_BETTER,
+                    options.max_regression,
+                )
+                if enough
+                else "inconclusive"
+            )
+            reason = "" if enough else f"fewer than {KERNEL_MIN_SAMPLES} iterations"
+            results.append(
+                RowResult(
+                    benchmark=str(base["benchmark"]),
+                    detail=str(base["detail"]),
+                    unit=str(base["unit"]),
+                    baseline=float(base["value"]),
+                    candidate=float(cand["value"]),
+                    delta_pct=delta.point_pct,
+                    low_pct=delta.low_pct,
+                    high_pct=delta.high_pct,
+                    n_baseline=len(base_samples),
+                    n_candidate=len(cand_samples),
+                    source="samples",
+                    verdict=verdict,
+                    reason=reason,
+                )
+            )
+        else:
+            point = _relative(float(base["value"]), float(cand["value"]))
+            results.append(
+                RowResult(
+                    benchmark=str(base["benchmark"]),
+                    detail=str(base["detail"]),
+                    unit=str(base["unit"]),
+                    baseline=float(base["value"]),
+                    candidate=float(cand["value"]),
+                    delta_pct=point,
+                    low_pct=None,
+                    high_pct=None,
+                    n_baseline=0,
+                    n_candidate=0,
+                    source="record",
+                    verdict=_point_verdict(point, HIGHER_IS_BETTER, options.max_regression),
+                )
+            )
+    skipped = tuple(sorted(set(base_rows) ^ set(cand_rows)))
+    return tuple(results), skipped
+
+
 def compare_runs(
     baseline: RunData, candidate: RunData, options: CompareOptions | None = None
 ) -> CompareReport:
-    """Compare two bench runs and return the full report."""
+    """Compare two bench or kernel runs and return the full report."""
     chosen = options or CompareOptions()
     if baseline.command != candidate.command:
         raise InvalidMeasurement(
             f"cannot compare a {baseline.command} run with a {candidate.command} run"
         )
-    if baseline.command != BENCH_COMMAND:
-        raise InvalidMeasurement(
-            f"this release compares bench runs; {baseline.command} comparison is not implemented"
-        )
     compatibility = _compatibility(baseline, candidate, chosen)
+    if baseline.command == KERNEL_COMMAND:
+        rows, skipped_rows = _compare_kernel(baseline, candidate, chosen)
+        return CompareReport(
+            baseline=_summary(baseline),
+            candidate=_summary(candidate),
+            compatibility=compatibility,
+            context=_context(baseline, candidate),
+            levels=(),
+            skipped_levels=(),
+            options=chosen,
+            command=baseline.command,
+            rows=rows,
+            skipped_rows=skipped_rows,
+        )
+    if baseline.command == PROFILE_COMMAND:
+        raise InvalidMeasurement(
+            "profile runs are inspection evidence; their kernel summaries are not gated"
+        )
+    if baseline.command != BENCH_COMMAND:
+        raise InvalidMeasurement(f"cannot compare {baseline.command} runs")
     baseline_levels = {level["concurrency"] for level in baseline.levels()}
     candidate_levels = {level["concurrency"] for level in candidate.levels()}
     shared = sorted(baseline_levels & candidate_levels)
@@ -809,21 +1016,27 @@ def compare_runs(
     )
 
 
+def _observations(report: CompareReport) -> list[tuple[str, str, float | None]]:
+    observations = [(metric.name, metric.verdict, metric.delta_pct) for metric in report.metrics()]
+    observations.extend((row.label, row.verdict, row.delta_pct) for row in report.rows)
+    return observations
+
+
 def gate_failures(report: CompareReport) -> list[str]:
     """Every reason the gate would fail, in a stable order."""
     failures = list(report.compatibility.failures)
-    for metric in report.metrics():
-        if metric.verdict == "missing":
-            failures.append(f"missing metric {metric.name}")
-        elif metric.verdict == "regressed":
+    for label, verdict, delta in _observations(report):
+        if verdict == "missing":
+            failures.append(f"missing metric {label}")
+        elif verdict == "regressed":
             failures.append(
-                f"{metric.name}: {_format_pct(metric.delta_pct)} beyond "
+                f"{label}: {_format_pct(delta)} beyond "
                 f"{report.options.max_regression:.1f}% tolerance"
             )
-        elif metric.verdict == "point_regressed" and report.options.fail_on_point:
-            failures.append(f"{metric.name}: point estimate regressed")
-        elif metric.verdict == "inconclusive" and report.options.fail_on_inconclusive:
-            failures.append(f"{metric.name}: inconclusive")
+        elif verdict == "point_regressed" and report.options.fail_on_point:
+            failures.append(f"{label}: point estimate regressed")
+        elif verdict == "inconclusive" and report.options.fail_on_inconclusive:
+            failures.append(f"{label}: inconclusive")
     return failures
 
 
@@ -831,7 +1044,7 @@ def gate_exit_code(report: CompareReport) -> int:
     """0 for a pass, 1 for a regression, 3 for unusable evidence."""
     if not report.compatibility.ok:
         return 3
-    verdicts = [metric.verdict for metric in report.metrics()]
+    verdicts = [verdict for _, verdict, _ in _observations(report)]
     if any(verdict in {"missing", "invalid"} for verdict in verdicts):
         return 3
     if any(verdict == "regressed" for verdict in verdicts):
@@ -843,12 +1056,28 @@ def gate_exit_code(report: CompareReport) -> int:
     return 0
 
 
-def table_headers() -> list[str]:
+def table_headers(report: CompareReport) -> list[str]:
+    if report.command == KERNEL_COMMAND:
+        return ["kernel", "detail", "baseline", "candidate", "delta", "interval", "n", "verdict"]
     return ["conc", "metric", "baseline", "candidate", "delta", "interval", "n", "verdict"]
 
 
 def table_rows(report: CompareReport) -> list[list[str]]:
     """Rows for the terminal table and the markdown report."""
+    if report.command == KERNEL_COMMAND:
+        return [
+            [
+                row.benchmark,
+                row.detail,
+                _format_value(row.baseline, row.unit),
+                _format_value(row.candidate, row.unit),
+                _format_pct(row.delta_pct),
+                _format_interval(row.low_pct, row.high_pct),
+                f"{row.n_baseline}/{row.n_candidate}",
+                row.verdict,
+            ]
+            for row in report.rows
+        ]
     rows: list[list[str]] = []
     for level in report.levels:
         for metric in level.metrics:
@@ -859,7 +1088,7 @@ def table_rows(report: CompareReport) -> list[list[str]]:
                     _format_value(metric.baseline, metric.unit),
                     _format_value(metric.candidate, metric.unit),
                     _format_pct(metric.delta_pct),
-                    _format_interval(metric),
+                    _format_interval(metric.low_pct, metric.high_pct),
                     f"{metric.n_baseline}/{metric.n_candidate}",
                     metric.verdict,
                 ]
@@ -881,10 +1110,10 @@ def _format_pct(value: float | None) -> str:
     return "-" if value is None else f"{value:+.1f}%"
 
 
-def _format_interval(metric: MetricResult) -> str:
-    if metric.low_pct is None or metric.high_pct is None:
+def _format_interval(low: float | None, high: float | None) -> str:
+    if low is None or high is None:
         return "-"
-    return f"[{metric.low_pct:+.1f}, {metric.high_pct:+.1f}]%"
+    return f"[{low:+.1f}, {high:+.1f}]%"
 
 
 def _round(value: float | None) -> float | None:

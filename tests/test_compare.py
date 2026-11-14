@@ -11,6 +11,7 @@ from blinding import compare
 from blinding.errors import InvalidMeasurement
 
 RunFactory = Callable[..., Path]
+KernelFactory = Callable[..., Path]
 
 
 def _flat(value: float, count: int = 12) -> list[float]:
@@ -139,13 +140,53 @@ def test_no_shared_levels_is_an_error(
         compare.compare_runs(compare.load_run_data(base), compare.load_run_data(cand))
 
 
-def test_kernel_runs_are_not_compared_yet(
-    tmp_path: Path, bench_run_factory: RunFactory
+def test_kernel_runs_compare_from_samples(
+    tmp_path: Path, kernel_run_factory: KernelFactory
 ) -> None:
-    """Kernel comparison arrives with the kernel samples; the error says so."""
-    base = bench_run_factory(tmp_path, "a", ttfts={1: _flat(10.0)}, command="kernel")
-    cand = bench_run_factory(tmp_path, "b", ttfts={1: _flat(10.0)}, command="kernel")
-    with pytest.raises(InvalidMeasurement, match="not implemented"):
+    """Kernel rows use the per-iteration samples and fail a real regression."""
+    base = kernel_run_factory(
+        tmp_path,
+        "k1",
+        copy=[{"variant": "vec4-i1-w4", "block": 256, "gbps": 400.0, "samples": [400.0] * 8}],
+    )
+    cand = kernel_run_factory(
+        tmp_path,
+        "k2",
+        copy=[{"variant": "vec4-i1-w4", "block": 256, "gbps": 300.0, "samples": [300.0] * 8}],
+    )
+    comparison = compare.compare_runs(compare.load_run_data(base), compare.load_run_data(cand))
+    assert comparison.command == "kernel"
+    assert comparison.rows[0].verdict == "regressed"
+    assert compare.gate_exit_code(comparison) == 1
+    payload = comparison.as_dict()
+    assert payload["rows"][0]["benchmark"] == "copy"
+
+
+def test_kernel_legacy_rows_without_samples_are_advisory(
+    tmp_path: Path, kernel_run_factory: KernelFactory
+) -> None:
+    """A schema-1 kernel record compares point values without an interval."""
+    base = kernel_run_factory(tmp_path, "k1", copy=[{"block": 128, "gbps": 400.0}])
+    cand = kernel_run_factory(tmp_path, "k2", copy=[{"block": 128, "gbps": 300.0}])
+    comparison = compare.compare_runs(compare.load_run_data(base), compare.load_run_data(cand))
+    assert comparison.rows[0].source == "record"
+    assert comparison.rows[0].verdict == "point_regressed"
+    assert compare.gate_exit_code(comparison) == 0
+    strict = compare.compare_runs(
+        compare.load_run_data(base),
+        compare.load_run_data(cand),
+        compare.CompareOptions(fail_on_point=True),
+    )
+    assert compare.gate_exit_code(strict) == 1
+
+
+def test_profile_runs_are_not_gated(
+    tmp_path: Path, kernel_run_factory: KernelFactory
+) -> None:
+    """Profile evidence is inspection material and cannot be compared."""
+    base = kernel_run_factory(tmp_path, "p1", copy=[], command="profile")
+    cand = kernel_run_factory(tmp_path, "p2", copy=[], command="profile")
+    with pytest.raises(InvalidMeasurement, match="inspection evidence"):
         compare.compare_runs(compare.load_run_data(base), compare.load_run_data(cand))
 
 
@@ -175,4 +216,4 @@ def test_table_rendering_has_all_rows(
     comparison = compare.compare_runs(compare.load_run_data(base), compare.load_run_data(cand))
     rows = compare.table_rows(comparison)
     assert len(rows) == 5
-    assert len(compare.table_headers()) == len(rows[0])
+    assert len(compare.table_headers(comparison)) == len(rows[0])

@@ -1,19 +1,92 @@
 # Blinding
 
-Blinding measures a llama.cpp server on the machine you own. It pins a GGUF by
-commit and SHA-256, serves it on the CPU or a ROCm build, streams requests to
-measure time to first token and inter-token latency, sweeps llama.cpp flags with
-`llama-bench`, measures a HIP copy kernel and rocBLAS GEMM, scores a small prompt
-suite, and fine-tunes the 1.2 MB test model.
+Blinding measures and compares the LLM inference server you already run. It
+points at an OpenAI-compatible endpoint or starts a pinned llama.cpp model,
+streams requests to measure time to first token and inter-token latency, and
+writes a run record with the host, device, git commit, model hash, config, and
+a validity verdict. `blinding compare` turns two records into per-level deltas
+with bootstrap intervals, and `blinding gate` turns that comparison into a CI
+check that fails on a regression you can defend.
 
-Every command writes `results/<run-id>/run.json` with the host, device, git
-commit, model hash, config, and a validity verdict. The tables below are copied
-from those records.
+It is built for one Linux box: a CPU, and a Radeon GPU when the ROCm image is
+available. The numbers in this file come from an AMD Ryzen 7 5700X and a
+Radeon RX 7800 XT.
 
-It is for one Linux box with a CPU and, if you have one, a Radeon GPU. The
-numbers here come from an AMD Ryzen 7 5700X and a Radeon RX 7800 XT.
+## The loop
 
-## First run
+```bash
+# 1. Measure the server you already have running.
+blinding bench --url http://127.0.0.1:8000 --model-name qwen2.5-7b-instruct \
+  --concurrency 1 4 8 --requests 32
+
+# 2. Change one thing: engine build, quantisation, driver, or a serving flag.
+
+# 3. Measure again.
+blinding bench --url http://127.0.0.1:8000 --model-name qwen2.5-7b-instruct \
+  --concurrency 1 4 8 --requests 32
+
+# 4. Ask whether the change made it worse.
+blinding compare <baseline-run> <candidate-run>
+blinding gate --baseline <baseline-run> --candidate <candidate-run>
+```
+
+`compare` prints one row per level and metric: the two values, the relative
+change, a bootstrap interval for that change, and a verdict (`regressed`,
+`improved`, `unchanged`, or `inconclusive`). A regression counts only when the
+whole interval sits beyond the tolerance, so a noisy pair of runs does not
+produce a false alarm. `gate` exits 0 for a pass, 1 for a regression, and 3
+when the evidence is invalid or the runs are not comparable.
+
+## Install
+
+Blinding needs Python 3.12 or newer. There is no PyPI release yet; install from
+a checkout.
+
+```bash
+git clone https://github.com/meillaya/blinding
+cd blinding
+uv sync
+uv run blinding --help
+```
+
+The repository also ships two development environments that evaluate the same
+`devenv.nix`:
+
+```bash
+devenv shell            # devenv CLI, the primary path
+nix develop --impure    # flake entry point for an existing flake workflow
+```
+
+Both provide Python 3.12, uv, git, make, curl, and podman. The flake path
+needs `--impure` because devenv reads the working directory from the
+environment; add `--accept-flake-config` to use the pinned binary cache. The llama.cpp build,
+the ROCm userspace, and the HIP kernel benchmark live in the container images
+under `sandbox/`, because a measurement run should happen in a known image.
+`devenv.lock` and `flake.lock` pin the Nix inputs; regenerate both after
+changing an input (`devenv update`, `nix flake update`).
+
+## Point at a server that is already running
+
+This is the adoption path: no manifest entry, no local llama.cpp install, no
+model download. `--model-name` is the model id the server expects in the
+request body. If the server lists a single model at `/v1/models` and
+`--model-name` is omitted, Blinding uses that id.
+
+```bash
+blinding bench --url http://127.0.0.1:8000 --model-name qwen2.5-7b-instruct \
+  --concurrency 1 4 8 --requests 32 --prompt-tokens 1024 --max-tokens 256
+```
+
+Set `BLINDING_API_KEY` when the endpoint needs a key. The run record keeps the
+base URL and redacts the key. `eval --url` scores the prompt suite against the
+same kind of endpoint.
+
+If the server has no `/tokenize` endpoint, Blinding measures the prompt length
+with one non-streamed request and records how it got the number in
+`workload.prompt_tokens_source`. Servers that reject `stream_options` are
+retried once without it.
+
+## Measure a pinned local model
 
 The sandbox keeps every file it creates inside this checkout. It builds a
 llama.cpp image at the pinned commit, puts the podman store and the model cache
@@ -34,9 +107,6 @@ If Python 3.12, uv, and llama.cpp are already on the machine, `uv sync` and
 `uv run blinding ...` work without the container. The model cache then defaults
 to `~/.cache/blinding`.
 
-For host-side work, `devenv shell` provides Python 3.12, uv, and podman from
-`devenv.nix`. llama.cpp and the GPU toolchain come from the container images.
-
 For the GPU, build the ROCm image and use the HIP config:
 
 ```bash
@@ -49,36 +119,23 @@ scripts/sandbox.sh run --rocm uv run blinding bench qwen2.5-7b-instruct:q4_k_m \
 
 ## What the commands do
 
-`blinding doctor` prints the CPU, memory, kernel, llama.cpp binaries, and the
-devices llama.cpp reports. It exits non-zero when a required binary is missing.
+| command | job |
+|---|---|
+| `bench` | Start or attach to a server, send streamed requests at each concurrency level, and record TTFT, inter-token latency, decode throughput, per-request samples, and errors. |
+| `compare` | Read two bench records and report per-level metric deltas with bootstrap intervals and verdicts. |
+| `gate` | Run `compare` as a check: fail on a regression, unusable evidence, or an unintended host change. |
+| `doctor` | Print the CPU, memory, kernel, llama.cpp binaries, and the devices llama.cpp reports. |
+| `models` | List, pull, and verify the pinned models by revision and SHA-256. |
+| `serve` | Run `llama-server` in the foreground, with an optional API-key gateway in front. |
+| `tune` | Sweep `llama-bench` over quants, thread counts, and GPU layers and name a Pareto config. |
+| `eval` | Score the prompt suite at temperature zero with a Wilson interval on the pass rate. |
+| `kernel` | Run the HIP copy kernel and rocBLAS GEMM benchmark in the ROCm image. |
+| `train` | Fine-tune the small F32 test model and measure perplexity before and after. |
+| `results` | List and show recorded runs. |
 
-`blinding models pull <model>:<quant>` downloads the pinned shards, checks size
-and SHA-256 while streaming, and links split shards into one directory so
-llama.cpp can find them. `models verify` re-checks a cached copy.
-
-`blinding serve <model>:<quant>` runs `llama-server` with a config. `--gateway`
-starts the API gateway in front with an API key, a per-key token bucket, and
-Prometheus metrics.
-
-`blinding bench` starts a server on a free port, sends a fixed number of
-streamed requests at each concurrency level, and reports TTFT, inter-token
-latency, decode throughput, and errors. A run with more than 5% errors or fewer
-than eight successful requests per level is marked invalid and does not enter a
-summary table.
-
-`blinding tune` runs `llama-bench` over quants, thread counts, and GPU layers.
-It writes a Pareto set and names a config only when the mean gap is larger than
-the standard deviation.
-
-`blinding kernel` runs the HIP copy kernel and rocBLAS GEMM benchmark in the
-ROCm image.
-
-`blinding eval` sends the prompt suite at temperature zero and scores exact,
-regex, JSON, and contains checks. It reports the pass count with a Wilson
-interval.
-
-`blinding train` runs `llama-finetune` on an F32 GGUF and a text corpus, then
-measures perplexity before and after on held-out text.
+Every command writes `results/<run-id>/run.json` and a human report. A
+benchmark with more than 5% errors or fewer than eight successful requests per
+level is marked invalid and its metrics do not enter a summary table.
 
 ## How the client measures
 
@@ -92,6 +149,12 @@ tokens divided by wall time for the level.
 The prompt is repeated seed text, tokenized by the server, so the prompt length
 is measured rather than estimated. A request that ends without content or
 without `[DONE]` is an error, not a zero.
+
+`compare` resamples the per-request samples the benchmark wrote. TTFT
+percentiles resample requests; inter-token percentiles resample whole requests
+and pool their gaps, because gaps inside one request are not independent. The
+default is 2000 resamples at 95% confidence with a fixed seed, so the same
+records produce the same intervals.
 
 ## Measured on this machine
 
@@ -136,8 +199,8 @@ copied from a config. `llama-server --list-devices` reports the RX 7800 XT.
 ## Tuning
 
 The CPU sweep ran six configurations with `llama-bench`, three repetitions
-each (run `20261110T232306Z`). `tg` is the raw generation loop; it is higher than the HTTP decode number
-because it excludes the server path.
+each (run `20261110T232306Z`). `tg` is the raw generation loop; it is higher than
+the HTTP decode number because it excludes the server path.
 
 | quant | threads | pp tok/s | tg tok/s | file size |
 |---|---|---|---|---|
@@ -189,14 +252,13 @@ each shape. Source-level kernel autotuning is not implemented.
 
 The tiny F32 model fine-tuned on 52 KB of Aesop for one epoch (run
 `20261110T232609Z`). Perplexity on the held-out text fell from 61.114 to 38.548
-in 5.1 s. That proves the harness, not
-the quality of a model. The same command accepts any F32 GGUF the machine can
-hold.
+in 5.1 s. That proves the harness, not the quality of a model. The same command
+accepts any F32 GGUF the machine can hold.
 
 The 16-prompt suite scored 10 of 16 on Qwen2.5-0.5B (62.5%, Wilson 38.6% to
 81.5%, run `20261110T232302Z`) and 15 of 16 on Qwen2.5-7B (93.8%, Wilson 71.7%
-to 98.9%, run `20261110T232701Z`). The suite is
-small and strict about format; a fenced JSON answer fails the JSON check.
+to 98.9%, run `20261110T232701Z`). The suite is small and strict about format; a
+fenced JSON answer fails the JSON check.
 
 ## Serving behind a key
 
@@ -218,8 +280,17 @@ SIGTERM to the CLI stopped the gateway and the server and wrote the run record.
 The numbers are one host on one day. Load average is in every run record, but
 the tables are a snapshot, not an SLO.
 
+A single pair of runs carries request sampling noise but not run-to-run host
+drift. The intervals say how much the request sample moved, not how much the
+machine moved between runs. Treat `inconclusive` as "run it again with more
+requests", and compare runs that share a host and device.
+
 The CPU benchmark uses one server slot, so concurrency shows queueing rather
 than parallel decode. The GPU benchmark uses four slots.
+
+The endpoint mode measures the server you point at; it does not configure it,
+so the engine flags and versions are whatever that server runs. The run record
+says that with `model.source: endpoint` and a null config.
 
 No cloud deployment is measured or claimed. The old InferenceOps platform and
 its AWS layer were removed; the audit in the repository records the evidence.
@@ -230,3 +301,19 @@ does not train a useful model, and GPU fine-tuning is not measured.
 The GPU requires ROCm and the podman device pass-through. Without them the tool
 reports CPU only. The sandbox passes `/dev/kfd` and the render node and nothing
 else.
+
+## Development
+
+```bash
+make check          # lint, typecheck, tests, prose
+make figures        # regenerate the Excalidraw scenes and PNGs
+make sandbox-check  # run every gate inside the CPU image
+```
+
+`tools/check_prose.py` is the mechanical prose gate. The repository history is
+in `AUDIT.md`, which records why the old demo platform was replaced and how the
+current claims are checked.
+
+## License
+
+MIT. See `LICENSE`.

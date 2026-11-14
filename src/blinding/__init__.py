@@ -1,3 +1,3 @@
-"""Blinding: serve, measure, and tune llama.cpp on the machine you own."""
+"""Blinding: measure, compare, and regression-test local LLM inference servers."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

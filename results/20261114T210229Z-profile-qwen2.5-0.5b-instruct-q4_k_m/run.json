@@ -1,0 +1,340 @@
+{
+  "argv": [
+    "/home/mei/Documents/blinding/.sandbox/venv-rocm/bin/blinding",
+    "profile",
+    "qwen2.5-0.5b-instruct:q4_k_m",
+    "--config",
+    "configs/local-rocm.toml",
+    "--gpu-layers",
+    "99",
+    "--pp",
+    "256",
+    "--tg",
+    "64",
+    "--reps",
+    "1",
+    "--results",
+    ".sandbox/results"
+  ],
+  "artifacts": {
+    "report": "report.md"
+  },
+  "blinding_version": "0.3.0",
+  "command": "profile",
+  "config": {
+    "batch_size": 2048,
+    "cache_type_k": "f16",
+    "cache_type_v": "f16",
+    "ctx_size": 8192,
+    "device": "hip",
+    "extra_args": [],
+    "flash_attn": "auto",
+    "gpu_layers": 99,
+    "host": "127.0.0.1",
+    "name": "local-rocm",
+    "parallel": 1,
+    "port": 8001,
+    "threads": 8,
+    "threads_batch": 0,
+    "ubatch_size": 512
+  },
+  "devices": [
+    {
+      "backend": "ROCm0",
+      "gfx": "gfx1101",
+      "memory_mib": 16142,
+      "name": "AMD Radeon RX 7800 XT"
+    }
+  ],
+  "duration_s": 1.176,
+  "git": {
+    "commit": "800bf5f46c511f554a03a24b2f46aa3cb3b64bbe",
+    "dirty": false
+  },
+  "host": {
+    "cpu_model": "AMD Ryzen 7 5700X 8-Core Processor",
+    "hostname": "massive",
+    "kernel": "7.3.3-1-cachyos",
+    "load1": 5.75341796875,
+    "load15": 12.88525390625,
+    "load5": 13.173828125,
+    "memory_gib": 62.7,
+    "nproc": 16,
+    "platform": "Linux-7.3.3-1-cachyos-x86_64-with-glibc2.39"
+  },
+  "metrics": {
+    "kernels": [
+      {
+        "calls": 6957,
+        "mean_s": 9.740061233290211e-06,
+        "name": "void mul_mat_vec_q<(ggml_type)6, 1, true, false, false>(void const*, void const*, int const*, ggml_cuda_mm_fusion_args_device, float*, unsigned int, HIP_vector_type<unsigned int, 3u>, unsigned int, unsigned int, unsigned int, HIP_vector_type<unsigned int, 3u>, unsigned int, unsigned int, unsigned int, HIP_vector_type<unsigned int, 3u>, unsigned int, unsigned int, unsigned int, unsigned int)",
+        "p50_s": 4.76e-06,
+        "share": 0.37119986367164487,
+        "total_s": 0.067761606
+      },
+      {
+        "calls": 67,
+        "mean_s": 0.0005052138358208955,
+        "name": "void mul_mat_vec_q<(ggml_type)8, 1, false, false, false>(void const*, void const*, int const*, ggml_cuda_mm_fusion_args_device, float*, unsigned int, HIP_vector_type<unsigned int, 3u>, unsigned int, unsigned int, unsigned int, HIP_vector_type<unsigned int, 3u>, unsigned int, unsigned int, unsigned int, HIP_vector_type<unsigned int, 3u>, unsigned int, unsigned int, unsigned int, unsigned int)",
+        "p50_s": 0.000504683,
+        "share": 0.18542750547820439,
+        "total_s": 0.033849327
+      },
+      {
+        "calls": 9431,
+        "mean_s": 1.2991520517442478e-06,
+        "name": "quantize_q8_1(float const*, void*, long, long, long, long, long, unsigned int, HIP_vector_type<unsigned int, 3u>)",
+        "p50_s": 1.24e-06,
+        "share": 0.06711843876993832,
+        "total_s": 0.012252303
+      },
+      {
+        "calls": 260,
+        "mean_s": 4.242297692307693e-05,
+        "name": "void mul_mat_q<(ggml_type)6, 128, false>(char const*, int const*, int const*, int const*, float*, float*, float const*, HIP_vector_type<unsigned int, 3u>, int, int, int, int, int, HIP_vector_type<unsigned int, 3u>, HIP_vector_type<unsigned int, 3u>, int, int, int, HIP_vector_type<unsigned int, 3u>, HIP_vector_type<unsigned int, 3u>, int, int, int, HIP_vector_type<unsigned int, 3u>)",
+        "p50_s": 2.364e-05,
+        "share": 0.060422488290814536,
+        "total_s": 0.011029974000000001
+      },
+      {
+        "calls": 3283,
+        "mean_s": 3.092321657021018e-06,
+        "name": "void rms_norm_f32<256, true, false>(float const*, float*, int, long, long, long, float, float const*, long, long, long, HIP_vector_type<unsigned int, 3u>, HIP_vector_type<unsigned int, 3u>, HIP_vector_type<unsigned int, 3u>, HIP_vector_type<unsigned int, 3u>, float const*, long, long, long, HIP_vector_type<unsigned int, 3u>, HIP_vector_type<unsigned int, 3u>, HIP_vector_type<unsigned int, 3u>, HIP_vector_type<unsigned int, 3u>)",
+        "p50_s": 3e-06,
+        "share": 0.055613427556336206,
+        "total_s": 0.010152092000000001
+      },
+      {
+        "calls": 1560,
+        "mean_s": 4.62586858974359e-06,
+        "name": "void flash_attn_tile<64, 64, 2, 1, false>(char const*, char const*, char const*, char const*, char const*, int const*, float*, HIP_vector_type<float, 2u>*, float, float, float, float, unsigned int, float, int, HIP_vector_type<unsigned int, 3u>, int, int, int, int, int, int, int, int, int, int, int, long, int, int, long, int, int, int, int, int, long)",
+        "p50_s": 4.56e-06,
+        "share": 0.03953138289263972,
+        "total_s": 0.007216355000000001
+      },
+      {
+        "calls": 780,
+        "mean_s": 9.069928205128206e-06,
+        "name": "void mul_mat_vec_q<(ggml_type)14, 1, true, false, false>(void const*, void const*, int const*, ggml_cuda_mm_fusion_args_device, float*, unsigned int, HIP_vector_type<unsigned int, 3u>, unsigned int, unsigned int, unsigned int, HIP_vector_type<unsigned int, 3u>, unsigned int, unsigned int, unsigned int, HIP_vector_type<unsigned int, 3u>, unsigned int, unsigned int, unsigned int, unsigned int)",
+        "p50_s": 9e-06,
+        "share": 0.03875453849690418,
+        "total_s": 0.007074544
+      },
+      {
+        "calls": 782,
+        "mean_s": 6.721057544757033e-06,
+        "name": "void mul_mat_vec_q<(ggml_type)12, 1, true, false, false>(void const*, void const*, int const*, ggml_cuda_mm_fusion_args_device, float*, unsigned int, HIP_vector_type<unsigned int, 3u>, unsigned int, unsigned int, unsigned int, HIP_vector_type<unsigned int, 3u>, unsigned int, unsigned int, unsigned int, HIP_vector_type<unsigned int, 3u>, unsigned int, unsigned int, unsigned int, unsigned int)",
+        "p50_s": 6.640000000000001e-06,
+        "share": 0.028791777955739378,
+        "total_s": 0.005255867
+      },
+      {
+        "calls": 1608,
+        "mean_s": 2.8043669154228856e-06,
+        "name": "void rope_neox<true, false, float, __half>(float const*, __half*, int, int, int, int, int, int, int, int, int, int, int, int const*, float, float, float, rope_corr_dims, float, float const*, long const*, int, bool)",
+        "p50_s": 2.74e-06,
+        "share": 0.024702732571567385,
+        "total_s": 0.004509422
+      },
+      {
+        "calls": 1608,
+        "mean_s": 2.441614427860697e-06,
+        "name": "void rope_neox<true, false, float, float>(float const*, float*, int, int, int, int, int, int, int, int, int, int, int, int const*, float, float, float, rope_corr_dims, float, float const*, long const*, int, bool)",
+        "p50_s": 1.76e-06,
+        "share": 0.021507366929276496,
+        "total_s": 0.003926116
+      },
+      {
+        "calls": 1560,
+        "mean_s": 1.999394871794872e-06,
+        "name": "void flash_attn_combine_results<64>(float const*, HIP_vector_type<float, 2u> const*, float*, int)",
+        "p50_s": 1.9200000000000003e-06,
+        "share": 0.017086270977465116,
+        "total_s": 0.0031190560000000003
+      },
+      {
+        "calls": 1608,
+        "mean_s": 1.3994608208955225e-06,
+        "name": "void k_set_rows<float, long, __half>(float const*, long const*, __half*, long, long, long, long, long, long, long, long, long, long, long, long, long, long, HIP_vector_type<unsigned int, 3u>, HIP_vector_type<unsigned int, 3u>, HIP_vector_type<unsigned int, 3u>, HIP_vector_type<unsigned int, 3u>, HIP_vector_type<unsigned int, 3u>)",
+        "p50_s": 1.32e-06,
+        "share": 0.012327383486392039,
+        "total_s": 0.002250333
+      },
+      {
+        "calls": 22,
+        "mean_s": 9.454240909090909e-05,
+        "name": "void mul_mat_q<(ggml_type)12, 128, false>(char const*, int const*, int const*, int const*, float*, float*, float const*, HIP_vector_type<unsigned int, 3u>, int, int, int, int, int, HIP_vector_type<unsigned int, 3u>, HIP_vector_type<unsigned int, 3u>, int, int, int, HIP_vector_type<unsigned int, 3u>, HIP_vector_type<unsigned int, 3u>, int, int, int, HIP_vector_type<unsigned int, 3u>)",
+        "p50_s": 9.474e-05,
+        "share": 0.011393927795131587,
+        "total_s": 0.002079933
+      },
+      {
+        "calls": 48,
+        "mean_s": 3.690847916666667e-05,
+        "name": "void flash_attn_ext_f16<64, 64, 8, 8, false, false, false>(char const*, char const*, char const*, char const*, char const*, int const*, float*, HIP_vector_type<float, 2u>*, float, float, float, float, unsigned int, float, int, HIP_vector_type<unsigned int, 3u>, int, int, int, int, int, int, int, int, int, int, int, long, int, int, long, int, int, int, int, int, long)",
+        "p50_s": 3.62e-05,
+        "share": 0.009704909840533174,
+        "total_s": 0.0017716070000000001
+      },
+      {
+        "calls": 780,
+        "mean_s": 1.9199589743589746e-06,
+        "name": "void mul_mat_vec_q<(ggml_type)8, 1, true, false, false>(void const*, void const*, int const*, ggml_cuda_mm_fusion_args_device, float*, unsigned int, HIP_vector_type<unsigned int, 3u>, unsigned int, unsigned int, unsigned int, HIP_vector_type<unsigned int, 3u>, unsigned int, unsigned int, unsigned int, HIP_vector_type<unsigned int, 3u>, unsigned int, unsigned int, unsigned int, unsigned int)",
+        "p50_s": 1.8400000000000002e-06,
+        "share": 0.008203716975642783,
+        "total_s": 0.0014975680000000001
+      },
+      {
+        "calls": 519,
+        "mean_s": 2.7528439306358385e-06,
+        "name": "__amd_rocclr_copyBuffer",
+        "p50_s": 2.8000000000000003e-06,
+        "share": 0.007826598685163019,
+        "total_s": 0.0014287260000000002
+      },
+      {
+        "calls": 24,
+        "mean_s": 4.81285e-05,
+        "name": "Cijk_Alik_Bljk_HB_MT64x64x32_MI16x16x16x1_SN_1LDSB1_APM1_ABV0_ACED0_AF0EM1_AF1EM1_AMAS0_ASE_ASGT_ASLT_ASM_ASAE01_ASCE01_ASEM1_AAC0_BL1_BS1_CLR0_DTLA0_DTLB0_DTVA0_DTVB0_DVO0_ETSP_EPS1_ELFLR0_EMLL0_FSSC10_FL0_GLVWA8_GLVWB8_GRCGA1_GRCGB1_GRPM1_GRVW8_GSU1_GSUASB_GLS0_ISA1101_IU2_K1_KLA_LBSPPA128_LBSPPB128_LPA8_LPB8_LDL1_LRVW16_LWPMn1_LDW0_FMA_MIAV1_MDA2_MO40_MMFGLC_MKFGSU256_NTA0_NTB0_NTC0_NTD0_NEPBS0_NLCA1_NLCB1_ONLL1_OPLV0_PK0_PAP0_PGR1_PLR1_PKA0_SIA2_SLW1_SS1_SU0_SUM0_SUS0_SCIUI1_SPO0_SRVW0_SSO0_SVW1_SNLL0_TSGRA0_TSGRB0_TT2_32_TLDS1_UMLDSA1_UMLDSB1_U64SL1_USFGROn1_VAW2_VSn1_VW1_VWB2_VFLRP0_WSGRA1_WSGRB1_WS32_WG32_4_1_WGM4",
+        "p50_s": 4.7921000000000004e-05,
+        "share": 0.006327580596736421,
+        "total_s": 0.001155084
+      },
+      {
+        "calls": 303,
+        "mean_s": 3.1436402640264027e-06,
+        "name": "void k_bin_bcast<&(op_add(float, float)), float, float, float, float const*>(float const*, float const*, float*, unsigned int, unsigned int, unsigned int, HIP_vector_type<unsigned int, 3u>, HIP_vector_type<unsigned int, 3u>, HIP_vector_type<unsigned int, 3u>, HIP_vector_type<unsigned int, 3u>, HIP_vector_type<unsigned int, 3u>, unsigned int, unsigned int, unsigned int, unsigned int, unsigned int, unsigned int, unsigned int, unsigned int, unsigned int, unsigned int, unsigned int, float const*)",
+        "p50_s": 2.3600000000000003e-06,
+        "share": 0.005217946099803275,
+        "total_s": 0.000952523
+      },
+      {
+        "calls": 46,
+        "mean_s": 1.7825282608695654e-05,
+        "name": "void unary_gated_op_kernel<&(op_silu(float)), float>(float const*, float const*, float*, long, long, long, long)",
+        "p50_s": 1.7660000000000004e-05,
+        "share": 0.004491778925897845,
+        "total_s": 0.000819963
+      },
+      {
+        "calls": 328,
+        "mean_s": 2.4764664634146344e-06,
+        "name": "__amd_rocclr_fillBufferAligned",
+        "p50_s": 2.3600000000000003e-06,
+        "share": 0.004449696727422125,
+        "total_s": 0.0008122810000000001
+      },
+      {
+        "calls": 284,
+        "mean_s": 2.749728873239437e-06,
+        "name": "void quantize_mmq_q8_1<(mmq_q8_1_ds_layout)0, false>(float const*, int const*, void*, long, long, long, long, long, int, int, int)",
+        "p50_s": 2.7200000000000002e-06,
+        "share": 0.00427791677691423,
+        "total_s": 0.0007809230000000001
+      },
+      {
+        "calls": 48,
+        "mean_s": 1.42584375e-05,
+        "name": "void flash_attn_stream_k_fixup_general<64, 8, 8>(float*, HIP_vector_type<float, 2u> const*, int, int, int, int, HIP_vector_type<unsigned int, 3u>, HIP_vector_type<unsigned int, 3u>, HIP_vector_type<unsigned int, 3u>, HIP_vector_type<unsigned int, 3u>)",
+        "p50_s": 1.428e-05,
+        "share": 0.003749188628973642,
+        "total_s": 0.000684405
+      },
+      {
+        "calls": 24,
+        "mean_s": 2.0730041666666668e-05,
+        "name": "void mul_mat_q<(ggml_type)8, 128, false>(char const*, int const*, int const*, int const*, float*, float*, float const*, HIP_vector_type<unsigned int, 3u>, int, int, int, int, int, HIP_vector_type<unsigned int, 3u>, HIP_vector_type<unsigned int, 3u>, int, int, int, HIP_vector_type<unsigned int, 3u>, HIP_vector_type<unsigned int, 3u>, int, int, int, HIP_vector_type<unsigned int, 3u>)",
+        "p50_s": 2.0840000000000004e-05,
+        "share": 0.0027254331512417285,
+        "total_s": 0.000497521
+      },
+      {
+        "calls": 24,
+        "mean_s": 1.8430041666666666e-05,
+        "name": "void convert_unary<float, __half>(void const*, __half*, long, long, long, HIP_vector_type<unsigned int, 3u>, long, long, long)",
+        "p50_s": 1.824e-05,
+        "share": 0.0024230460963263717,
+        "total_s": 0.000442321
+      },
+      {
+        "calls": 24,
+        "mean_s": 1.6948583333333336e-05,
+        "name": "void dequantize_block_q6_K<__half>(void const*, __half*)",
+        "p50_s": 1.654e-05,
+        "share": 0.002228274869197467,
+        "total_s": 0.00040676600000000003
+      },
+      {
+        "calls": 65,
+        "mean_s": 4.5532461538461545e-06,
+        "name": "void mul_mat_vec_q<(ggml_type)6, 1, false, false, false>(void const*, void const*, int const*, ggml_cuda_mm_fusion_args_device, float*, unsigned int, HIP_vector_type<unsigned int, 3u>, unsigned int, unsigned int, unsigned int, HIP_vector_type<unsigned int, 3u>, unsigned int, unsigned int, unsigned int, HIP_vector_type<unsigned int, 3u>, unsigned int, unsigned int, unsigned int, unsigned int)",
+        "p50_s": 4.52e-06,
+        "share": 0.001621282158692102,
+        "total_s": 0.000295961
+      },
+      {
+        "calls": 134,
+        "mean_s": 1.6540298507462689e-06,
+        "name": "void k_get_rows_float<float, float>(float const*, int const*, float*, long, long, HIP_vector_type<unsigned int, 3u>, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long)",
+        "p50_s": 1.76e-06,
+        "share": 0.0012141497618014451,
+        "total_s": 0.00022164000000000003
+      },
+      {
+        "calls": 22,
+        "mean_s": 8.792727272727274e-06,
+        "name": "void quantize_mmq_q8_1<(mmq_q8_1_ds_layout)1, false>(float const*, int const*, void*, long, long, long, long, long, int, int, int)",
+        "p50_s": 8.62e-06,
+        "share": 0.0010596694185294692,
+        "total_s": 0.00019344000000000002
+      },
+      {
+        "calls": 24,
+        "mean_s": 4.576666666666667e-06,
+        "name": "void convert_unary<__half, float>(void const*, float*, long, long, long, HIP_vector_type<unsigned int, 3u>, long, long, long)",
+        "p50_s": 4.56e-06,
+        "share": 0.0006017064150707035,
+        "total_s": 0.00010984
+      }
+    ],
+    "total_kernel_s": 0.182547
+  },
+  "model": {
+    "context": 32768,
+    "files": [
+      {
+        "file": "qwen2.5-0.5b-instruct-q4_k_m.gguf",
+        "path": "/home/mei/Documents/blinding/.sandbox/cache/models/qwen2.5-0.5b-instruct/q4_k_m/qwen2.5-0.5b-instruct-q4_k_m.gguf",
+        "sha256": "74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db"
+      }
+    ],
+    "id": "qwen2.5-0.5b-instruct",
+    "quant": "q4_k_m",
+    "revision": "9217f5db79a29953eb74d5343926648285ec7e67"
+  },
+  "schema_version": 2,
+  "started_at": "2026-11-14T21:02:29Z",
+  "tools": {
+    "paths": {
+      "llama_bench": "/usr/local/bin/llama-bench",
+      "llama_finetune": "/usr/local/bin/llama-finetune",
+      "llama_perplexity": "/usr/local/bin/llama-perplexity",
+      "llama_server": "/usr/local/bin/llama-server"
+    },
+    "versions": {
+      "llama-bench": "",
+      "llama-finetune": "version: 0.4.1-dev (build 1, commit b29c606)",
+      "llama-perplexity": "version: 0.4.1-dev (build 1, commit b29c606)",
+      "llama-server": "version: 0.4.1-dev (build 1, commit b29c606)"
+    }
+  },
+  "validity": {
+    "reasons": [],
+    "valid": true
+  },
+  "workload": {
+    "pp": 256,
+    "reps": 1,
+    "tg": 64
+  }
+}

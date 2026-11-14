@@ -245,10 +245,10 @@ and shows the copy blocks.
 | gemm fp32 | 2048 nt | 11,672.9 GFLOPS |
 
 The full 20-point table is in `results/20261110T232718Z-kernel-hip/report.md`.
-The copy kernel peaks at 466 GB/s with 256-thread blocks. The kernel command
-measures that copy kernel and the GEMM kernels the rocBLAS library selects for
-each shape. Source-level kernel autotuning of the GEMM path is not implemented;
-the copy kernel has a variant sweep, described below.
+In that schema-1 run the copy kernel peaks at 466 GB/s with 256-thread blocks.
+The kernel command measures that copy kernel and the GEMM kernels the rocBLAS
+library selects for each shape. Source-level kernel autotuning of the GEMM path
+is not implemented; the copy kernel has a variant sweep, described below.
 
 ### Kernel evidence
 
@@ -267,12 +267,31 @@ against the source buffer before it is timed.
 percent of peak bandwidth or throughput next to the raw rate. The peaks are
 624 GB/s, 37.3 TFLOPS fp32, and 74.6 TFLOPS fp16.
 
+The schema-2 run `20261114T210159Z` repeats the blocks with seven
+per-iteration samples each and runs the autotune sweep, which pre-warms the
+memory clock before it measures:
+
+| block | variant | GB/s | percent of peak |
+|---|---|---|---|
+| 128 | vec2-i4-w1 | 475.1 | 76.1% |
+| 256 | vec4-i2-w1 | 503.6 | 80.7% |
+| 512 | vec2-i4-w1 | 512.9 | 82.2% |
+| 1024 | vec2-i1-w1 | 508.3 | 81.5% |
+
+The best GEMM point in that run is fp16 at 4096 nn: 59,240.5 GFLOPS, 79.4% of
+the 74.6 TFLOPS fp16 peak. The first copy level in a fresh process reads low
+until the memory clock ramps, which is why the sweep pre-warms and the run
+record keeps the per-iteration samples rather than a single peak.
+
 `blinding profile <model>:<quant> --config configs/local-rocm.toml` runs
 llama-bench inference for a pinned model under rocprofv3 and records where the
-kernel time went, as calls, total seconds, and share per kernel. The trace
-files stay under the run directory but are git-ignored, because a full trace
-is local debugging material, not repository content. `blinding kernel
---profile` does the same for the HIP benchmark.
+kernel time went, as calls, total seconds, and share per kernel. A run on
+Qwen2.5-0.5B Q4_K_M (`20261114T210229Z`) traced 0.183 s of kernel time; the
+largest share was the q6 matrix-vector kernel at 37.1%, then the q8 variant at
+18.5% and the q8_1 quantiser at 6.7%. The trace files stay under the run
+directory but are git-ignored, because a full trace is local debugging
+material, not repository content. `blinding kernel --profile` does the same
+for the HIP benchmark.
 
 ## Training and evaluation
 

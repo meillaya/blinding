@@ -1,0 +1,483 @@
+{
+  "argv": [
+    "/home/mei/Documents/blinding/.sandbox/venv-rocm/bin/blinding",
+    "kernel",
+    "--autotune-copy",
+    "--results",
+    "results"
+  ],
+  "artifacts": {
+    "report": "report.md"
+  },
+  "blinding_version": "0.3.0",
+  "command": "kernel",
+  "config": {
+    "autotune_copy": true,
+    "blocks": [
+      128,
+      256,
+      512,
+      1024
+    ],
+    "copy_variants": [
+      "vec4-i1-w4"
+    ],
+    "sizes": [
+      1024,
+      2048,
+      4096
+    ]
+  },
+  "devices": [
+    {
+      "backend": "ROCm0",
+      "gfx": "gfx1101",
+      "memory_mib": 16142,
+      "name": "AMD Radeon RX 7800 XT"
+    }
+  ],
+  "duration_s": 1.271,
+  "git": {
+    "commit": "800bf5f46c511f554a03a24b2f46aa3cb3b64bbe",
+    "dirty": false
+  },
+  "host": {
+    "cpu_model": "AMD Ryzen 7 5700X 8-Core Processor",
+    "hostname": "massive",
+    "kernel": "7.3.3-1-cachyos",
+    "load1": 7.58984375,
+    "load15": 13.22216796875,
+    "load5": 14.27978515625,
+    "memory_gib": 62.7,
+    "nproc": 16,
+    "platform": "Linux-7.3.3-1-cachyos-x86_64-with-glibc2.39"
+  },
+  "metrics": {
+    "autotune": [
+      {
+        "block": 128,
+        "gbps": 475.062,
+        "pct_of_peak": 76.13173076923077,
+        "variant": "vec2-i4-w1"
+      },
+      {
+        "block": 256,
+        "gbps": 503.586,
+        "pct_of_peak": 80.70288461538462,
+        "variant": "vec4-i2-w1"
+      },
+      {
+        "block": 512,
+        "gbps": 512.872,
+        "pct_of_peak": 82.19102564102563,
+        "variant": "vec2-i4-w1"
+      },
+      {
+        "block": 1024,
+        "gbps": 508.256,
+        "pct_of_peak": 81.45128205128205,
+        "variant": "vec2-i1-w1"
+      }
+    ],
+    "bench_schema": 2,
+    "clocks": {
+      "gpu_mhz": null,
+      "power_w": null
+    },
+    "copy": [
+      {
+        "block": 128,
+        "gbps": 305.077,
+        "pct_of_peak": 48.89054487179487,
+        "samples": [
+          316.088,
+          328.465,
+          329.303,
+          306.251,
+          285.35,
+          303.921,
+          274.721
+        ],
+        "variant": "vec4-i1-w4"
+      },
+      {
+        "block": 256,
+        "gbps": 472.653,
+        "pct_of_peak": 75.74567307692308,
+        "samples": [
+          464.548,
+          487.708,
+          478.288,
+          422.998,
+          485.275,
+          490.202,
+          487.46
+        ],
+        "variant": "vec4-i1-w4"
+      },
+      {
+        "block": 512,
+        "gbps": 475.408,
+        "pct_of_peak": 76.18717948717949,
+        "samples": [
+          479.587,
+          481.445,
+          478.868,
+          458.988,
+          478.697,
+          478.629,
+          472.43
+        ],
+        "variant": "vec4-i1-w4"
+      },
+      {
+        "block": 1024,
+        "gbps": 463.366,
+        "pct_of_peak": 74.2573717948718,
+        "samples": [
+          420.006,
+          466.518,
+          469.948,
+          470.541,
+          473.196,
+          473.563,
+          475.206
+        ],
+        "variant": "vec4-i1-w4"
+      }
+    ],
+    "device": "AMD Radeon RX 7800 XT",
+    "errors": [],
+    "gemm": [
+      {
+        "dtype": "fp16",
+        "gflops": 34376.947,
+        "layout": "nn",
+        "pct_of_peak": 46.081698391420915,
+        "samples": [
+          34793.968,
+          34839.124,
+          33617.467,
+          33201.663,
+          35157.965,
+          34998.103,
+          34130.384
+        ],
+        "size": 1024
+      },
+      {
+        "dtype": "fp16",
+        "gflops": 27291.318,
+        "layout": "nt",
+        "pct_of_peak": 36.583536193029495,
+        "samples": [
+          21973.637,
+          26201.606,
+          25985.694,
+          30573.515,
+          33449.902,
+          30486.274,
+          25687.604
+        ],
+        "size": 1024
+      },
+      {
+        "dtype": "fp16",
+        "gflops": 23976.512,
+        "layout": "tn",
+        "pct_of_peak": 32.14009651474531,
+        "samples": [
+          25614.071,
+          24085.729,
+          23839.474,
+          23967.452,
+          23619.226,
+          23829.157,
+          23031.538
+        ],
+        "size": 1024
+      },
+      {
+        "dtype": "fp16",
+        "gflops": 39318.677,
+        "layout": "nn",
+        "pct_of_peak": 52.70600134048258,
+        "samples": [
+          37751.067,
+          40618.093,
+          38777.066,
+          41409.15,
+          35512.986,
+          40320.572,
+          41621.733
+        ],
+        "size": 2048
+      },
+      {
+        "dtype": "fp16",
+        "gflops": 52720.91,
+        "layout": "nt",
+        "pct_of_peak": 70.67146112600537,
+        "samples": [
+          51485.753,
+          51890.229,
+          52847.801,
+          53083.105,
+          53767.407,
+          53633.291,
+          52422.079
+        ],
+        "size": 2048
+      },
+      {
+        "dtype": "fp16",
+        "gflops": 13974.598,
+        "layout": "tn",
+        "pct_of_peak": 18.73270509383378,
+        "samples": [
+          14613.268,
+          13015.388,
+          14256.608,
+          13181.155,
+          13680.788,
+          15308.484,
+          14041.289
+        ],
+        "size": 2048
+      },
+      {
+        "dtype": "fp16",
+        "gflops": 59240.451,
+        "layout": "nn",
+        "pct_of_peak": 79.41079222520108,
+        "samples": [
+          61663.066,
+          60878.074,
+          59644.79,
+          58090.854,
+          57134.561,
+          58683.213,
+          58838.971
+        ],
+        "size": 4096
+      },
+      {
+        "dtype": "fp16",
+        "gflops": 55901.727,
+        "layout": "nt",
+        "pct_of_peak": 74.9352908847185,
+        "samples": [
+          53466.314,
+          56038.749,
+          56916.901,
+          57009.451,
+          57308.044,
+          54542.493,
+          56251.593
+        ],
+        "size": 4096
+      },
+      {
+        "dtype": "fp16",
+        "gflops": 32391.405,
+        "layout": "tn",
+        "pct_of_peak": 43.42011394101877,
+        "samples": [
+          32302.263,
+          32534.418,
+          32789.319,
+          32140.313,
+          32986.06,
+          32351.539,
+          31670.758
+        ],
+        "size": 4096
+      },
+      {
+        "dtype": "fp32",
+        "gflops": 8183.081,
+        "layout": "nn",
+        "pct_of_peak": 21.938554959785524,
+        "samples": [
+          8195.22,
+          8180.204,
+          8202.733,
+          8176.498,
+          8210.259,
+          8186.473,
+          8130.681
+        ],
+        "size": 1024
+      },
+      {
+        "dtype": "fp32",
+        "gflops": 10083.936,
+        "layout": "nt",
+        "pct_of_peak": 27.03468096514745,
+        "samples": [
+          9841.768,
+          10061.299,
+          10280.895,
+          10127.681,
+          10003.138,
+          10191.123,
+          10093.408
+        ],
+        "size": 1024
+      },
+      {
+        "dtype": "fp32",
+        "gflops": 7435.415,
+        "layout": "tn",
+        "pct_of_peak": 19.934088471849865,
+        "samples": [
+          7226.643,
+          7491.893,
+          7456.515,
+          7467.924,
+          7496.077,
+          7490.848,
+          7425.575
+        ],
+        "size": 1024
+      },
+      {
+        "dtype": "fp32",
+        "gflops": 9807.741,
+        "layout": "nn",
+        "pct_of_peak": 26.294211796246646,
+        "samples": [
+          9773.912,
+          9825.114,
+          9850.803,
+          9753.049,
+          9865.057,
+          9784.823,
+          9802.46
+        ],
+        "size": 2048
+      },
+      {
+        "dtype": "fp32",
+        "gflops": 11900.135,
+        "layout": "nt",
+        "pct_of_peak": 31.903847184986596,
+        "samples": [
+          12176.567,
+          12260.783,
+          11865.812,
+          11704.774,
+          11632.495,
+          11754.747,
+          11934.061
+        ],
+        "size": 2048
+      },
+      {
+        "dtype": "fp32",
+        "gflops": 8742.659,
+        "layout": "tn",
+        "pct_of_peak": 23.438764075067024,
+        "samples": [
+          8694.847,
+          8877.536,
+          8773.081,
+          8732.413,
+          8671.236,
+          8758.233,
+          8694.583
+        ],
+        "size": 2048
+      },
+      {
+        "dtype": "fp32",
+        "gflops": 10235.101,
+        "layout": "nn",
+        "pct_of_peak": 27.4399490616622,
+        "samples": [
+          10265.092,
+          10256.933,
+          10223.91,
+          10241.372,
+          10214.367,
+          10228.931,
+          10215.339
+        ],
+        "size": 4096
+      },
+      {
+        "dtype": "fp32",
+        "gflops": 12935.476,
+        "layout": "nt",
+        "pct_of_peak": 34.67956032171582,
+        "samples": [
+          12905.79,
+          12962.951,
+          12951.566,
+          12943.955,
+          12936.644,
+          12922.485,
+          12925.112
+        ],
+        "size": 4096
+      },
+      {
+        "dtype": "fp32",
+        "gflops": 8452.288,
+        "layout": "tn",
+        "pct_of_peak": 22.660289544235926,
+        "samples": [
+          8278.469,
+          8813.204,
+          8491.357,
+          8815.376,
+          8277.667,
+          8312.893,
+          8223.03
+        ],
+        "size": 4096
+      }
+    ],
+    "gfx": "gfx1101",
+    "peaks": {
+      "bandwidth_gbps": 624.0,
+      "fp16_tflops": 74.6,
+      "fp32_tflops": 37.3,
+      "name": "AMD Radeon RX 7800 XT"
+    },
+    "rocm_release": "7.2.4",
+    "rocm_version": "7.2.53211"
+  },
+  "model": null,
+  "schema_version": 2,
+  "started_at": "2026-11-14T21:01:59Z",
+  "tools": {
+    "paths": {
+      "llama_bench": "/usr/local/bin/llama-bench",
+      "llama_finetune": "/usr/local/bin/llama-finetune",
+      "llama_perplexity": "/usr/local/bin/llama-perplexity",
+      "llama_server": "/usr/local/bin/llama-server"
+    },
+    "versions": {
+      "llama-bench": "",
+      "llama-finetune": "version: 0.4.1-dev (build 1, commit b29c606)",
+      "llama-perplexity": "version: 0.4.1-dev (build 1, commit b29c606)",
+      "llama-server": "version: 0.4.1-dev (build 1, commit b29c606)"
+    }
+  },
+  "validity": {
+    "reasons": [],
+    "valid": true
+  },
+  "workload": {
+    "dtypes": [
+      "fp16",
+      "fp32"
+    ],
+    "layouts": [
+      "nn",
+      "nt",
+      "tn"
+    ]
+  }
+}

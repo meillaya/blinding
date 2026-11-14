@@ -1,0 +1,6 @@
+"Kind","Agent_Id","Queue_Id","Stream_Id","Thread_Id","Dispatch_Id","Kernel_Id","Kernel_Name","Correlation_Id","Start_Timestamp","End_Timestamp","LDS_Block_Size","Scratch_Size","VGPR_Count","Accum_VGPR_Count","SGPR_Count","Workgroup_Size_X","Workgroup_Size_Y","Workgroup_Size_Z","Grid_Size_X","Grid_Size_Y","Grid_Size_Z"
+"KERNEL_DISPATCH","Agent 4",1,1,852831,1,10,"add_kernel",1,1551401624448706,1551401624458706,0,0,8,0,16,64,1,1,1024,1024,1
+"KERNEL_DISPATCH","Agent 4",1,1,852831,2,13,"mul_kernel",2,1551401624465000,1551401624470000,0,0,8,0,16,64,1,1,1024,1024,1
+"KERNEL_DISPATCH","Agent 4",1,1,852831,3,10,"add_kernel",3,1551401624480000,1551401624510000,0,0,8,0,16,64,1,1,1024,1024,1
+"KERNEL_DISPATCH","Agent 4",1,1,852831,4,12,"relu_kernel",4,1551401624520000,1551401624545000,0,0,12,4,16,64,1,1,1024,1024,1
+"KERNEL_DISPATCH","Agent 4",2,2,852831,5,13,"mul_kernel",5,1551401624560000,1551401624575000,0,0,8,0,16,64,1,1,1024,1024,1

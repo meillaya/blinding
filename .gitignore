@@ -23,6 +23,7 @@ build/
 # Downloads and partial files
 *.part
 
-# Server logs are useful to the run that produced them, not to the repo.
+# Server logs and profiler traces are local evidence, not repo content.
+results/**/trace/
 results/**/server.log
 results/**/*.log

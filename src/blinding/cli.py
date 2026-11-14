@@ -814,14 +814,92 @@ def cmd_train(args: argparse.Namespace) -> int:
     return 3
 
 
+def cmd_profile(args: argparse.Namespace) -> int:
+    from blinding import profiler as profiler_module
+
+    model, quant, cache, results, _ = _resolve(args, args.model)
+    config = _config(args)
+    tools = _tools(args)
+    bench_binary = tools.require("llama-bench")
+    paths = _ensure(model, quant, cache)
+    run_dir = report.new_run_dir(results, "profile", f"{model.id}-{quant}")
+    started_at = report.utc_iso()
+    started = time.perf_counter()
+    command = [
+        bench_binary,
+        "-m",
+        str(paths[0]),
+        "-ngl",
+        str(config.gpu_layers),
+        "-p",
+        str(args.pp),
+        "-n",
+        str(args.tg),
+        "-r",
+        str(args.reps),
+        "-o",
+        "json",
+    ]
+    summary = profiler_module.run_profiled(
+        command, run_dir / "trace", timeout_s=args.timeout
+    )
+    duration = time.perf_counter() - started
+    kernels = profiler_module.summarize(summary.kernels, top=30)
+    headers = ["kernel", "calls", "total s", "mean ms", "share"]
+    rows = [
+        [
+            stat.name,
+            str(stat.calls),
+            f"{stat.total_s:.6f}",
+            f"{stat.mean_s * 1000.0:.3f}",
+            f"{stat.share * 100.0:.1f}%",
+        ]
+        for stat in kernels
+    ]
+    _print_table(headers, rows)
+    record = report.build_record(
+        command="profile",
+        argv=sys.argv,
+        root=ROOT,
+        tools=tools,
+        model=_model_meta(model, quant, paths),
+        config=config.as_dict(),
+        workload={"pp": args.pp, "tg": args.tg, "reps": args.reps},
+        metrics={
+            "total_kernel_s": round(summary.total_s, 6),
+            "kernels": [stat.as_dict() for stat in kernels],
+        },
+        validity={
+            "valid": bool(kernels),
+            "reasons": [] if kernels else ["the trace contained no kernels"],
+        },
+        artifacts={"report": "report.md"},
+        started_at=started_at,
+        duration_s=duration,
+    )
+    trace_files = "\n".join(str(path) for path in summary.trace_files)
+    _write_report(
+        run_dir,
+        record,
+        f"Profile {model.id}:{quant}",
+        [("Kernels", markdown_table(headers, rows)), ("Trace", trace_files)],
+    )
+    print(f"run       {run_dir}")
+    return 0 if kernels else 3
+
+
 def cmd_kernel(args: argparse.Namespace) -> int:
     from blinding import kernel
+    from blinding import profiler as profiler_module
 
     tools = _tools(args)
     _, _, results = _paths(args)
     run_dir = report.new_run_dir(results, "kernel", "hip")
     started_at = report.utc_iso()
     started = time.perf_counter()
+    variants = (
+        tuple(args.copy_variants) if args.copy_variants else kernel.DEFAULT_COPY_VARIANTS
+    )
     config = kernel.KernelConfig(
         binary=args.binary,
         blocks=tuple(args.blocks),
@@ -829,8 +907,27 @@ def cmd_kernel(args: argparse.Namespace) -> int:
         dtypes=tuple(args.dtypes),
         layouts=tuple(args.layouts),
         timeout_s=args.timeout,
+        copy_variants=variants,
+        autotune_copy=bool(args.autotune_copy),
     )
-    data = kernel.run_kernel(config)
+    data = kernel.attach_roofline(kernel.run_kernel(config))
+    if args.profile:
+        binary = kernel.resolve_binary(config)
+        summary = profiler_module.run_profiled(
+            kernel.build_command(config, binary), run_dir / "trace", timeout_s=args.timeout
+        )
+        kernels = profiler_module.summarize(summary.kernels, top=30)
+        data["profile"] = {
+            "total_kernel_s": round(summary.total_s, 6),
+            "kernels": [stat.as_dict() for stat in kernels],
+            "trace_files": [str(path) for path in summary.trace_files],
+        }
+        headers = ["kernel", "calls", "total s", "share"]
+        profile_rows = [
+            [stat.name, str(stat.calls), f"{stat.total_s:.6f}", f"{stat.share * 100.0:.1f}%"]
+            for stat in kernels
+        ]
+        _print_table(headers, profile_rows)
     duration = time.perf_counter() - started
     rows = kernel.summary_rows(data)
     _print_table(["kernel", "detail", "value"], rows)
@@ -840,7 +937,12 @@ def cmd_kernel(args: argparse.Namespace) -> int:
         root=ROOT,
         tools=tools,
         model=None,
-        config={"blocks": list(config.blocks), "sizes": list(config.sizes)},
+        config={
+            "blocks": list(config.blocks),
+            "sizes": list(config.sizes),
+            "copy_variants": list(variants),
+            "autotune_copy": config.autotune_copy,
+        },
         workload={"dtypes": list(config.dtypes), "layouts": list(config.layouts)},
         metrics=data,
         validity={"valid": True, "reasons": []},
@@ -892,9 +994,9 @@ def _print_compare(
         print(json.dumps(comparison.as_dict(), indent=2, sort_keys=True))
         return
     if as_markdown:
-        print(markdown_table(compare.table_headers(), compare.table_rows(comparison)))
+        print(markdown_table(compare.table_headers(comparison), compare.table_rows(comparison)))
         return
-    _print_table(compare.table_headers(), compare.table_rows(comparison))
+    _print_table(compare.table_headers(comparison), compare.table_rows(comparison))
     print()
     print(f"baseline  {comparison.baseline.run_id} {comparison.baseline.git_commit[:12]}")
     print(f"candidate {comparison.candidate.run_id} {comparison.candidate.git_commit[:12]}")
@@ -1092,6 +1194,18 @@ def _build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--timeout", type=float, default=1800.0)
     train_parser.set_defaults(handler=cmd_train)
 
+    profile_parser = sub.add_parser(
+        "profile", help="profile llama-bench inference kernels with rocprofv3"
+    )
+    _add_common(profile_parser)
+    _add_server_args(profile_parser)
+    profile_parser.add_argument("model")
+    profile_parser.add_argument("--pp", type=int, default=512)
+    profile_parser.add_argument("--tg", type=int, default=128)
+    profile_parser.add_argument("--reps", type=int, default=1)
+    profile_parser.add_argument("--timeout", type=float, default=600.0)
+    profile_parser.set_defaults(handler=cmd_profile)
+
     kernel_parser = sub.add_parser("kernel", help="run the HIP copy and GEMM benchmark")
     _add_common(kernel_parser)
     kernel_parser.add_argument("--binary")
@@ -1099,6 +1213,18 @@ def _build_parser() -> argparse.ArgumentParser:
     kernel_parser.add_argument("--sizes", type=int, nargs="+", default=[1024, 2048, 4096])
     kernel_parser.add_argument("--dtypes", nargs="+", default=["fp16", "fp32"])
     kernel_parser.add_argument("--layouts", nargs="+", default=["nn", "nt", "tn"])
+    kernel_parser.add_argument("--copy-variants", dest="copy_variants", nargs="+")
+    kernel_parser.add_argument(
+        "--autotune-copy",
+        dest="autotune_copy",
+        action="store_true",
+        help="sweep every copy variant and report the best per block",
+    )
+    kernel_parser.add_argument(
+        "--profile",
+        action="store_true",
+        help="also run the benchmark under rocprofv3 and record the kernel breakdown",
+    )
     kernel_parser.add_argument("--timeout", type=float, default=600.0)
     kernel_parser.set_defaults(handler=cmd_kernel)
 

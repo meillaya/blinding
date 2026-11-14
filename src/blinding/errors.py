@@ -6,6 +6,7 @@ from a backend that went away mid-run.
 """
 
 EXIT_OK = 0
+EXIT_REGRESSED = 1
 EXIT_USAGE = 2
 EXIT_INVALID = 3
 EXIT_MISSING = 4

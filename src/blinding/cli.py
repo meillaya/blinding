@@ -15,16 +15,27 @@ import os
 import signal
 import sys
 import time
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import FrameType
 from typing import Any
 
 import httpx
 
-from blinding import __version__, bench, client, doctor, download, manifest, proc, report, server
+from blinding import (
+    __version__,
+    bench,
+    client,
+    compare,
+    doctor,
+    download,
+    manifest,
+    proc,
+    report,
+    server,
+)
 from blinding.config import Device, ServerConfig, default_config, load_config
-from blinding.errors import BlindingError, MissingDependency, UsageError
+from blinding.errors import BlindingError, MissingDependency, UpstreamError, UsageError
 from blinding.report import markdown_table
 
 ROOT = report.repo_root()
@@ -386,36 +397,123 @@ def _start_test_server(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class ResolvedModel:
+    """A model label plus the pinned manifest model when one was given."""
+
+    label: str
+    model: manifest.Model | None
+    quant: str | None
+    source: str
+    base_url: str | None
+
+
+ENDPOINT_IGNORED_FLAGS = (
+    "config",
+    "device",
+    "threads",
+    "ctx_size",
+    "parallel",
+    "gpu_layers",
+    "port",
+)
+
+
+def _api_key(args: argparse.Namespace) -> str | None:
+    value = getattr(args, "api_key", None) or os.environ.get("BLINDING_API_KEY", "")
+    return value or None
+
+
+def _endpoint_label(args: argparse.Namespace) -> str:
+    label = getattr(args, "model_name", None) or getattr(args, "alias", None)
+    if label:
+        return str(label)
+    url = str(args.url).rstrip("/")
+    try:
+        models = asyncio.run(client.server_models(url, _api_key(args)))
+    except RuntimeError as exc:
+        raise UpstreamError(f"{exc}; pass --model-name to skip discovery") from exc
+    if not models:
+        raise UsageError(f"{url}/v1/models listed no model; pass --model-name")
+    return models[0]
+
+
+def _resolve_model(args: argparse.Namespace) -> ResolvedModel:
+    """Resolve the positional model or, for URL runs, the endpoint label."""
+    spec = getattr(args, "model", None)
+    url = getattr(args, "url", None)
+    if spec:
+        model, quant, _, _, _ = _resolve(args, str(spec))
+        label = getattr(args, "model_name", None) or getattr(args, "alias", None) or model.id
+        return ResolvedModel(
+            str(label),
+            model,
+            quant,
+            "endpoint" if url else "manifest",
+            str(url).rstrip("/") if url else None,
+        )
+    if url:
+        return ResolvedModel(_endpoint_label(args), None, None, "endpoint", str(url).rstrip("/"))
+    raise UsageError("a model argument or --url is required")
+
+
+def _warn_ignored_endpoint_flags(args: argparse.Namespace) -> None:
+    used = [flag for flag in ENDPOINT_IGNORED_FLAGS if getattr(args, flag, None) is not None]
+    if used:
+        rendered = ", ".join("--" + flag.replace("_", "-") for flag in used)
+        print(f"blinding: {rendered} ignored with --url", file=sys.stderr)
+
+
+def _model_record(resolved: ResolvedModel, paths: tuple[Path, ...]) -> dict[str, object]:
+    if resolved.model is not None and resolved.quant is not None:
+        if paths:
+            meta = _model_meta(resolved.model, resolved.quant, paths)
+        else:
+            meta = {"id": resolved.model.id, "quant": resolved.quant}
+        record = dict(meta)
+        record["source"] = resolved.source
+        if resolved.base_url is not None:
+            record["base_url"] = resolved.base_url
+        return record
+    return {
+        "id": resolved.label,
+        "quant": None,
+        "source": "endpoint",
+        "base_url": resolved.base_url,
+    }
+
+
+def _model_slug(resolved: ResolvedModel) -> str:
+    return resolved.label if resolved.quant is None else f"{resolved.label}-{resolved.quant}"
+
+
 def cmd_bench(args: argparse.Namespace) -> int:
-    model, quant, cache, results, _ = _resolve(args, args.model)
-    run_dir = report.new_run_dir(results, "bench", f"{model.id}-{quant}")
+    _, cache, results = _paths(args)
+    resolved = _resolve_model(args)
+    run_dir = report.new_run_dir(results, "bench", _model_slug(resolved))
     started_at = report.utc_iso()
-    paths: tuple[Path, ...] = ()
+    if resolved.model is None:
+        _warn_ignored_endpoint_flags(args)
+        return _run_bench_inside(
+            args, resolved, (), None, str(resolved.base_url), run_dir, started_at
+        )
+    if resolved.quant is None:
+        raise UsageError("internal: the manifest model has no quant")
     config = _config(args)
     if args.url:
         return _run_bench_inside(
-            args,
-            model,
-            quant,
-            paths,
-            config,
-            args.url.rstrip("/"),
-            args.alias or model.id,
-            run_dir,
-            started_at,
+            args, resolved, (), config, str(resolved.base_url), run_dir, started_at
         )
-    paths = _ensure(model, quant, cache)
+    paths = _ensure(resolved.model, resolved.quant, cache)
     serve_started = time.perf_counter()
     exit_code = 3
-    with _start_test_server(args, config, model, paths, run_dir) as running:
+    with _start_test_server(args, config, resolved.model, paths, run_dir) as running:
         exit_code = _run_bench_inside(
             args,
-            model,
-            quant,
+            resolved,
             paths,
             config,
             running.base_url(),
-            args.alias or model.id,
             run_dir,
             started_at,
             offload=running.offload(),
@@ -426,12 +524,10 @@ def cmd_bench(args: argparse.Namespace) -> int:
 
 def _run_bench_inside(
     args: argparse.Namespace,
-    model: manifest.Model,
-    quant: str,
+    resolved: ResolvedModel,
     paths: tuple[Path, ...],
-    config: ServerConfig,
+    config: ServerConfig | None,
     base_url: str,
-    model_label: str,
     run_dir: Path,
     started_at: str,
     *,
@@ -440,9 +536,9 @@ def _run_bench_inside(
 ) -> int:
     started = time.perf_counter()
     work = bench.BenchConfig(
-        model=model_label,
+        model=resolved.label,
         base_url=base_url,
-        api_key=args.api_key,
+        api_key=_api_key(args),
         concurrency=tuple(args.concurrency),
         requests_per_level=args.requests,
         warmup=args.warmup,
@@ -455,25 +551,27 @@ def _run_bench_inside(
     duration = time.perf_counter() - started
     rows = bench.summary_rows(result)
     headers = ["conc", "ok", "errors", "ttft p50", "ttft p95", "itl p50", "tok/s", "latency p95"]
-    _print_table(headers, rows)
     with (run_dir / "requests.csv").open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(
             handle, fieldnames=list(result.samples[0].keys()) if result.samples else []
         )
         writer.writeheader()
         writer.writerows(result.samples)
+    endpoint_only = resolved.model is None
     record = report.build_record(
         command="bench",
         argv=sys.argv,
         root=ROOT,
         tools=_tools(args),
-        model=_model_meta(model, quant, paths) if paths else {"id": model.id, "quant": quant},
-        config=config.as_dict(),
+        model=_model_record(resolved, paths),
+        config=config.as_dict() if config is not None else None,
+        devices=[] if endpoint_only else None,
         workload={
             "base_url": base_url,
             "concurrency": list(work.concurrency),
             "requests_per_level": work.requests_per_level,
             "prompt_tokens": result.prompt_tokens,
+            "prompt_tokens_source": getattr(result, "prompt_tokens_source", "unmeasured"),
             "max_tokens": work.max_tokens,
             "temperature": work.temperature,
         },
@@ -494,8 +592,13 @@ def _run_bench_inside(
             "valid" if result.valid else "\n".join(f"- {reason}" for reason in result.reasons),
         ),
     ]
-    _write_report(run_dir, record, f"Bench {model.id}:{quant}", sections)
-    print(f"run       {run_dir}")
+    _write_report(run_dir, record, f"Bench {_model_slug(resolved)}", sections)
+    if getattr(args, "json", False):
+        print(json.dumps(record, indent=2, sort_keys=True, default=str))
+        print(f"run       {run_dir}", file=sys.stderr)
+    else:
+        _print_table(headers, rows)
+        print(f"run       {run_dir}")
     if not result.valid:
         for reason in result.reasons:
             print(f"invalid: {reason}", file=sys.stderr)
@@ -506,32 +609,38 @@ def _run_bench_inside(
 def cmd_eval(args: argparse.Namespace) -> int:
     from blinding import evals
 
-    model, quant, cache, results, _ = _resolve(args, args.model)
-    config = _config(args)
+    _, cache, results = _paths(args)
+    resolved = _resolve_model(args)
+    endpoint_only = resolved.model is None
+    config: ServerConfig | None = None if endpoint_only else _config(args)
+    if not endpoint_only and resolved.quant is None:
+        raise UsageError("internal: the manifest model has no quant")
     suite = evals.load_suite(Path(args.suite))
-    run_dir = report.new_run_dir(results, "eval", f"{model.id}-{quant}")
+    run_dir = report.new_run_dir(results, "eval", _model_slug(resolved))
     started_at = report.utc_iso()
     started = time.perf_counter()
     paths: tuple[Path, ...] = ()
-    base_url = args.url.rstrip("/") if args.url else ""
+    base_url = resolved.base_url or ""
     result: dict[str, Any] = {}
 
     async def chat(prompt: str, max_tokens: int) -> tuple[bool, str, str]:
         ok, _status, text, error = await client.chat_once(
             base_url=base_url,
-            model=args.alias or model.id,
+            model=resolved.label,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=max_tokens,
             temperature=0.0,
-            api_key=args.api_key,
+            api_key=_api_key(args),
         )
         return (ok, text, error)
 
     if args.url:
         result = asyncio.run(evals.run_eval(suite, chat))
     else:
-        paths = _ensure(model, quant, cache)
-        with _start_test_server(args, config, model, paths, run_dir) as running:
+        if resolved.model is None or resolved.quant is None or config is None:
+            raise UsageError("internal: eval has no model")
+        paths = _ensure(resolved.model, resolved.quant, cache)
+        with _start_test_server(args, config, resolved.model, paths, run_dir) as running:
             base_url = running.base_url()
             result = asyncio.run(evals.run_eval(suite, chat))
     duration = time.perf_counter() - started
@@ -542,8 +651,9 @@ def cmd_eval(args: argparse.Namespace) -> int:
         argv=sys.argv,
         root=ROOT,
         tools=_tools(args),
-        model=_model_meta(model, quant, paths) if paths else {"id": model.id, "quant": quant},
-        config=config.as_dict(),
+        model=_model_record(resolved, paths),
+        config=config.as_dict() if config is not None else None,
+        devices=[] if endpoint_only else None,
         workload={"suite": str(args.suite), "cases": len(suite)},
         metrics=result,
         validity={"valid": True, "reasons": []},
@@ -560,7 +670,7 @@ def cmd_eval(args: argparse.Namespace) -> int:
             f"{result['wilson_high']:.1%})",
         ),
     ]
-    _write_report(run_dir, record, f"Eval {model.id}:{quant}", sections)
+    _write_report(run_dir, record, f"Eval {_model_slug(resolved)}", sections)
     print(
         f"score     {result['passed']}/{result['trials']} ({result['rate']:.1%}) "
         f"wilson {result['wilson_low']:.1%}..{result['wilson_high']:.1%}"
@@ -748,6 +858,69 @@ def cmd_kernel(args: argparse.Namespace) -> int:
     return 0
 
 
+def _compare_options(args: argparse.Namespace) -> compare.CompareOptions:
+    return compare.CompareOptions(
+        resamples=args.resamples,
+        confidence=args.confidence,
+        seed=args.seed,
+        max_regression=args.max_regression,
+        min_samples=args.min_samples,
+        allow_host_change=args.allow_host_change,
+        allow_device_change=args.allow_device_change,
+        require_clean=args.require_clean,
+        fail_on_point=getattr(args, "fail_on_point", False),
+        fail_on_inconclusive=getattr(args, "fail_on_inconclusive", False),
+    )
+
+
+def _compare_report(args: argparse.Namespace) -> compare.CompareReport:
+    _, _, results = _paths(args)
+    try:
+        baseline = report.find_run(results, args.baseline)
+        candidate = report.find_run(results, args.candidate)
+    except ValueError as exc:
+        raise UsageError(str(exc)) from exc
+    left = compare.load_run_data(Path(str(baseline["run_dir"])))
+    right = compare.load_run_data(Path(str(candidate["run_dir"])))
+    return compare.compare_runs(left, right, _compare_options(args))
+
+
+def _print_compare(
+    comparison: compare.CompareReport, as_json: bool, as_markdown: bool
+) -> None:
+    if as_json:
+        print(json.dumps(comparison.as_dict(), indent=2, sort_keys=True))
+        return
+    if as_markdown:
+        print(markdown_table(compare.table_headers(), compare.table_rows(comparison)))
+        return
+    _print_table(compare.table_headers(), compare.table_rows(comparison))
+    print()
+    print(f"baseline  {comparison.baseline.run_id} {comparison.baseline.git_commit[:12]}")
+    print(f"candidate {comparison.candidate.run_id} {comparison.candidate.git_commit[:12]}")
+    for warning in comparison.compatibility.warnings:
+        print(f"warning: {warning}", file=sys.stderr)
+    for failure in comparison.compatibility.failures:
+        print(f"incompatible: {failure}", file=sys.stderr)
+
+
+def cmd_compare(args: argparse.Namespace) -> int:
+    _print_compare(_compare_report(args), bool(args.json), bool(args.markdown))
+    return 0
+
+
+def cmd_gate(args: argparse.Namespace) -> int:
+    comparison = _compare_report(args)
+    _print_compare(comparison, bool(args.json), bool(args.markdown))
+    code = compare.gate_exit_code(comparison)
+    verdict = comparison.overall_verdict()
+    line = f"gate      {'pass' if code == 0 else 'fail'} ({verdict})"
+    print(line, file=sys.stderr if args.json else sys.stdout)
+    for failure in compare.gate_failures(comparison):
+        print(f"failure: {failure}", file=sys.stderr)
+    return code
+
+
 def cmd_results(args: argparse.Namespace) -> int:
     _, _, results = _paths(args)
     if args.action == "list":
@@ -773,10 +946,7 @@ def cmd_results(args: argparse.Namespace) -> int:
             else json.dumps(run, indent=2)
         )
         return 0
-    left = report.find_run(results, args.left)
-    right = report.find_run(results, args.right)
-    print(json.dumps({"left": left.get("metrics"), "right": right.get("metrics")}, indent=2))
-    return 0
+    raise UsageError(f"unknown results action {args.action!r}")
 
 
 def _add_common(parser: argparse.ArgumentParser) -> None:
@@ -795,7 +965,31 @@ def _add_server_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--parallel", type=int, help="server slots")
     parser.add_argument("--gpu-layers", dest="gpu_layers", type=int, help="layers to offload")
     parser.add_argument("--alias", help="model alias shown by the API")
-    parser.add_argument("--api-key", help="API key sent to the gateway")
+    parser.add_argument("--api-key", help="API key sent to the server or gateway")
+
+
+def _add_compare_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--json", action="store_true", help="print the compare object as JSON")
+    parser.add_argument("--seed", type=int, default=0, help="bootstrap seed (default 0)")
+    parser.add_argument("--resamples", type=int, default=2000, help="bootstrap resamples")
+    parser.add_argument("--confidence", type=float, default=0.95, help="interval confidence")
+    parser.add_argument(
+        "--max-regression",
+        dest="max_regression",
+        type=float,
+        default=5.0,
+        help="regression tolerance in percent (default 5.0)",
+    )
+    parser.add_argument(
+        "--min-samples",
+        dest="min_samples",
+        type=int,
+        default=8,
+        help="samples needed before a verdict is made (default 8)",
+    )
+    parser.add_argument("--allow-host-change", dest="allow_host_change", action="store_true")
+    parser.add_argument("--allow-device-change", dest="allow_device_change", action="store_true")
+    parser.add_argument("--require-clean", dest="require_clean", action="store_true")
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -847,8 +1041,11 @@ def _build_parser() -> argparse.ArgumentParser:
     bench_parser = sub.add_parser("bench", help="measure TTFT, ITL, and throughput")
     _add_common(bench_parser)
     _add_server_args(bench_parser)
-    bench_parser.add_argument("model")
+    bench_parser.add_argument("model", nargs="?")
     bench_parser.add_argument("--url", help="benchmark an already running OpenAI-compatible server")
+    bench_parser.add_argument(
+        "--model-name", dest="model_name", help="model name to send when no manifest entry is used"
+    )
     bench_parser.add_argument("--concurrency", type=int, nargs="+", default=[1, 2, 4])
     bench_parser.add_argument("--requests", type=int, default=8)
     bench_parser.add_argument("--warmup", type=int, default=2)
@@ -856,6 +1053,7 @@ def _build_parser() -> argparse.ArgumentParser:
     bench_parser.add_argument("--max-tokens", dest="max_tokens", type=int, default=128)
     bench_parser.add_argument("--temperature", type=float, default=0.0)
     bench_parser.add_argument("--timeout", type=float, default=180.0)
+    bench_parser.add_argument("--json", action="store_true", help="print the run record as JSON")
     bench_parser.set_defaults(handler=cmd_bench)
 
     tune_parser = sub.add_parser("tune", help="sweep llama-bench configurations")
@@ -875,7 +1073,10 @@ def _build_parser() -> argparse.ArgumentParser:
     eval_parser = sub.add_parser("eval", help="score the prompt suite")
     _add_common(eval_parser)
     _add_server_args(eval_parser)
-    eval_parser.add_argument("model")
+    eval_parser.add_argument("model", nargs="?")
+    eval_parser.add_argument(
+        "--model-name", dest="model_name", help="model name to send when no manifest entry is used"
+    )
     eval_parser.add_argument("--suite", default=str(ROOT / "prompts" / "core.jsonl"))
     eval_parser.add_argument("--url")
     eval_parser.set_defaults(handler=cmd_eval)
@@ -901,7 +1102,27 @@ def _build_parser() -> argparse.ArgumentParser:
     kernel_parser.add_argument("--timeout", type=float, default=600.0)
     kernel_parser.set_defaults(handler=cmd_kernel)
 
-    results_parser = sub.add_parser("results", help="list, show, and compare recorded runs")
+    compare_parser = sub.add_parser("compare", help="compare two recorded bench runs")
+    _add_common(compare_parser)
+    compare_parser.add_argument("baseline")
+    compare_parser.add_argument("candidate")
+    _add_compare_args(compare_parser)
+    compare_parser.add_argument("--markdown", action="store_true")
+    compare_parser.set_defaults(handler=cmd_compare)
+
+    gate_parser = sub.add_parser("gate", help="fail when a run regressed against a baseline")
+    _add_common(gate_parser)
+    gate_parser.add_argument("--baseline", required=True)
+    gate_parser.add_argument("--candidate", default="latest")
+    _add_compare_args(gate_parser)
+    gate_parser.add_argument("--markdown", action="store_true")
+    gate_parser.add_argument("--fail-on-point", dest="fail_on_point", action="store_true")
+    gate_parser.add_argument(
+        "--fail-on-inconclusive", dest="fail_on_inconclusive", action="store_true"
+    )
+    gate_parser.set_defaults(handler=cmd_gate)
+
+    results_parser = sub.add_parser("results", help="list and show recorded runs")
     _add_common(results_parser)
     results_sub = results_parser.add_subparsers(dest="action", required=True)
     results_list = results_sub.add_parser("list")
@@ -911,11 +1132,6 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_common(results_show)
     results_show.add_argument("selector")
     results_show.set_defaults(handler=cmd_results)
-    results_compare = results_sub.add_parser("compare")
-    _add_common(results_compare)
-    results_compare.add_argument("left")
-    results_compare.add_argument("right")
-    results_compare.set_defaults(handler=cmd_results)
 
     return parser
 

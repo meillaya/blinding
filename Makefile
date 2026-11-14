@@ -8,11 +8,14 @@ CONFIG ?= configs/local-cpu.toml
 CORPUS ?= data/corpus.txt
 UV ?= uv
 SANDBOX ?= scripts/sandbox.sh
+BASELINE ?= latest
+LEFT ?= latest
+RIGHT ?= latest
 
 .DEFAULT_GOAL := help
 
 .PHONY: help sync test lint typecheck prose check figures \
-	doctor models serve bench tune eval train kernel results \
+	doctor models serve bench tune eval train kernel results compare gate \
 	sandbox-init sandbox-cpu sandbox-rocm sandbox-check sandbox-clean clean
 
 help: ## List the targets
@@ -65,6 +68,12 @@ kernel: ## Run the HIP copy and GEMM benchmark (GPU image only)
 
 results: ## List recorded runs
 	$(UV) run blinding results list
+
+compare: ## Compare two runs (LEFT=... RIGHT=...)
+	$(UV) run blinding compare $(LEFT) $(RIGHT)
+
+gate: ## Fail when the latest run regressed against BASELINE
+	$(UV) run blinding gate --baseline $(BASELINE)
 
 sandbox-init: ## Create the workspace-local podman store
 	$(SANDBOX) init

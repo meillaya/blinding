@@ -3,6 +3,34 @@
 All notable changes to this project are documented here. The format follows
 Keep a Changelog and the project uses semantic versioning.
 
+## 0.3.0
+
+### Added
+
+- Kernel records now carry per-iteration samples, and the compare engine can
+  gate kernel runs the same way it gates serving runs: a copy or GEMM row is a
+  regression only when its bootstrap interval sits beyond the tolerance.
+- Source-level copy variants (`--copy-variants vecN-iM-wW`) and
+  `--autotune-copy`, which sweeps 18 variant, item, and wave combinations and
+  reports the best per block. Every variant is checked against the source
+  buffer before it is timed.
+- Roofline context: `configs/rocm-peaks.toml` carries the gfx1101 peaks and
+  each kernel row reports its percent of peak.
+- `blinding profile <model>:<quant>` runs llama-bench inference under
+  rocprofv3, records the per-kernel time breakdown, and keeps the trace under
+  the git-ignored run trace directory. `blinding kernel --profile` does the
+  same for the HIP benchmark.
+- The kernel command emits `bench_schema: 2`; schema-1 rows from an older
+  binary still validate and compare as point values.
+
+### Changed
+
+- Compare JSON gains `rows` and `skipped_rows` for kernel runs, and the table
+  layout depends on the run kind.
+- The ROCm image installs libdw, which rocprofiler-sdk needs for kernel
+  traces.
+- `results/**/trace/` is ignored: profiler traces are local evidence.
+
 ## 0.2.0
 
 ### Added

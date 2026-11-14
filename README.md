@@ -2,9 +2,9 @@
 
 Blinding measures and compares the LLM inference server you already run. It
 points at an OpenAI-compatible endpoint or starts a pinned llama.cpp model,
-streams requests to measure time to first token and inter-token latency, and
-writes a run record with the host, device, git commit, model hash, config, and
-a validity verdict. `blinding compare` turns two records into per-level deltas
+streams requests to measure time to first token and inter-token latency,
+profiles the kernels a run launches, and writes a run record with the host,
+device, git commit, model hash, config, and a validity verdict. `blinding compare` turns two records into per-level deltas
 with bootstrap intervals, and `blinding gate` turns that comparison into a CI
 check that fails on a regression you can defend.
 
@@ -129,8 +129,9 @@ scripts/sandbox.sh run --rocm uv run blinding bench qwen2.5-7b-instruct:q4_k_m \
 | `serve` | Run `llama-server` in the foreground, with an optional API-key gateway in front. |
 | `tune` | Sweep `llama-bench` over quants, thread counts, and GPU layers and name a Pareto config. |
 | `eval` | Score the prompt suite at temperature zero with a Wilson interval on the pass rate. |
-| `kernel` | Run the HIP copy kernel and rocBLAS GEMM benchmark in the ROCm image. |
+| `kernel` | Run the HIP copy and rocBLAS GEMM benchmark in the ROCm image, with per-iteration samples, source-level copy variants, autotune, roofline percentages, and an optional rocprofv3 kernel breakdown. |
 | `train` | Fine-tune the small F32 test model and measure perplexity before and after. |
+| `profile` | Run llama-bench inference under rocprofv3 and record the kernel-time breakdown for a pinned model. |
 | `results` | List and show recorded runs. |
 
 Every command writes `results/<run-id>/run.json` and a human report. A
@@ -246,7 +247,32 @@ and shows the copy blocks.
 The full 20-point table is in `results/20261110T232718Z-kernel-hip/report.md`.
 The copy kernel peaks at 466 GB/s with 256-thread blocks. The kernel command
 measures that copy kernel and the GEMM kernels the rocBLAS library selects for
-each shape. Source-level kernel autotuning is not implemented.
+each shape. Source-level kernel autotuning of the GEMM path is not implemented;
+the copy kernel has a variant sweep, described below.
+
+### Kernel evidence
+
+The kernel command writes schema 2: every copy and GEMM row carries the seven
+per-iteration samples behind its mean, so `compare` can say whether a kernel
+change is real instead of comparing two single-number runs.
+
+Copy rows can name a source variant with `--copy-variants vec4-i2-w2`, where
+the numbers are floats per vector, items per thread, and waves per compute
+unit. `--autotune-copy` sweeps all 18 combinations over the configured block
+sizes and reports the best variant per block, with a clock pre-warm so the
+winner is not simply the variant measured last. Each variant is checked
+against the source buffer before it is timed.
+
+`configs/rocm-peaks.toml` carries the gfx1101 peaks, so each row reports its
+percent of peak bandwidth or throughput next to the raw rate. The peaks are
+624 GB/s, 37.3 TFLOPS fp32, and 74.6 TFLOPS fp16.
+
+`blinding profile <model>:<quant> --config configs/local-rocm.toml` runs
+llama-bench inference for a pinned model under rocprofv3 and records where the
+kernel time went, as calls, total seconds, and share per kernel. The trace
+files stay under the run directory but are git-ignored, because a full trace
+is local debugging material, not repository content. `blinding kernel
+--profile` does the same for the HIP benchmark.
 
 ## Training and evaluation
 
@@ -298,9 +324,15 @@ its AWS layer were removed; the audit in the repository records the evidence.
 Fine-tuning uses llama.cpp's work-in-progress example and a 1.2 MB model. It
 does not train a useful model, and GPU fine-tuning is not measured.
 
+The first copy measurement in a fresh process can read below the steady state
+until the card's memory clock ramps. `--autotune-copy` pre-warms for that
+reason; take kernel numbers from a warm run and treat the per-iteration
+samples, not a single peak, as the evidence.
+
 The GPU requires ROCm and the podman device pass-through. Without them the tool
 reports CPU only. The sandbox passes `/dev/kfd` and the render node and nothing
-else.
+else. Profiling needs `rocprofv3` from the ROCm image, and the walk of a real
+inference trace needs the model to fit in 16 GiB; the 0.5B quantisation does.
 
 ## Development
 

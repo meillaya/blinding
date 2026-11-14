@@ -553,7 +553,9 @@ def _run_bench_inside(
     headers = ["conc", "ok", "errors", "ttft p50", "ttft p95", "itl p50", "tok/s", "latency p95"]
     with (run_dir / "requests.csv").open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(
-            handle, fieldnames=list(result.samples[0].keys()) if result.samples else []
+            handle,
+            fieldnames=list(result.samples[0].keys()) if result.samples else [],
+            lineterminator="\n",
         )
         writer.writeheader()
         writer.writerows(result.samples)

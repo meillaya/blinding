@@ -12,13 +12,18 @@ from blinding.config import ServerConfig
 from blinding.server import LlamaServer
 
 
-@pytest.fixture
-def running_server(fake_server: Path, tmp_path: Path) -> LlamaServer:
-    """A fake server context manager with a free port."""
+def _make_server(fake_server: Path, tmp_path: Path) -> LlamaServer:
+    """Build a fake server context manager on a free port."""
     tools = proc.LlamaTools(server=str(fake_server), bench=None, finetune=None, perplexity=None)
     return LlamaServer(
         tools, ServerConfig(port=proc.free_port()), tmp_path / "tiny.gguf", "tiny", tmp_path
     )
+
+
+@pytest.fixture
+def running_server(fake_server: Path, tmp_path: Path) -> LlamaServer:
+    """A fake server context manager with a free port."""
+    return _make_server(fake_server, tmp_path)
 
 
 def test_stream_chat_records_ttft_and_tokens(running_server: LlamaServer) -> None:
@@ -90,10 +95,7 @@ def test_bench_invalid_when_errors_exceed_threshold(
 ) -> None:
     """A server that answers 500 produces no summary row."""
     monkeypatch.setenv("FAKE_SERVER_FAIL", "1")
-    tools = proc.LlamaTools(server=str(fake_server), bench=None, finetune=None, perplexity=None)
-    server = LlamaServer(
-        tools, ServerConfig(port=proc.free_port()), tmp_path / "tiny.gguf", "tiny", tmp_path
-    )
+    server = _make_server(fake_server, tmp_path)
     with server as running:
         config = bench.BenchConfig(
             model="tiny",
@@ -110,3 +112,71 @@ def test_bench_invalid_when_errors_exceed_threshold(
         result = asyncio.run(bench.run_bench(config))
     assert not result.valid
     assert any("error rate" in reason for reason in result.reasons)
+
+
+def test_probe_prompt_tokens_reads_usage(
+    fake_server: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A server without /tokenize still reports the count through usage."""
+    monkeypatch.setenv("FAKE_NO_TOKENIZE", "1")
+    monkeypatch.setenv("FAKE_PROMPT_TOKENS", "9")
+    server = _make_server(fake_server, tmp_path)
+    with server as running:
+        probed = asyncio.run(
+            client.probe_prompt_tokens(
+                base_url=running.base_url(),
+                model="tiny",
+                text="one two three",
+            )
+        )
+    assert probed == 9
+
+
+def test_probe_prompt_tokens_returns_none_when_rejected(
+    fake_server: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A rejected request leaves the prompt count unmeasured."""
+    monkeypatch.setenv("FAKE_SERVER_FAIL", "1")
+    server = _make_server(fake_server, tmp_path)
+    with server as running:
+        probed = asyncio.run(
+            client.probe_prompt_tokens(
+                base_url=running.base_url(),
+                model="tiny",
+                text="one two three",
+            )
+        )
+    assert probed is None
+
+
+def test_probe_prompt_tokens_returns_none_on_transport_error() -> None:
+    """A closed port is a transport failure, not an exception."""
+    probed = asyncio.run(
+        client.probe_prompt_tokens(
+            base_url=f"http://127.0.0.1:{proc.free_port()}",
+            model="tiny",
+            text="one two three",
+        )
+    )
+    assert probed is None
+
+
+def test_stream_chat_retries_without_stream_options(
+    fake_server: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A 400 for stream_options is retried once without that key."""
+    monkeypatch.setenv("FAKE_REJECT_STREAM_OPTIONS", "1")
+    monkeypatch.setenv("FAKE_CHUNK_DELAY_S", "0.0")
+    server = _make_server(fake_server, tmp_path)
+    with server as running:
+        sample = asyncio.run(
+            client.stream_chat(
+                base_url=running.base_url(),
+                model="tiny",
+                messages=[{"role": "user", "content": "hello"}],
+                max_tokens=4,
+            )
+        )
+    assert sample.ok
+    assert sample.status == 200
+    assert sample.chunks == 4

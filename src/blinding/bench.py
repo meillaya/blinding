@@ -57,10 +57,17 @@ class BenchResult:
     valid: bool = False
     reasons: list[str] = field(default_factory=list)
     prompt_tokens: int | None = None
+    prompt_tokens_source: str = "unmeasured"
 
 
-async def build_prompt(config: BenchConfig) -> tuple[str, int | None]:
-    """Repeat seed text until it reaches the requested token target."""
+async def build_prompt(config: BenchConfig) -> tuple[str, int | None, str]:
+    """Repeat seed text until it reaches the token target.
+
+    The count comes from /tokenize when the server has it. A server without
+    /tokenize gets one single-token request, whose usage block carries the
+    prompt count. When both routes fail the text is still sent and the count is
+    left unmeasured.
+    """
     measured = await client.tokenize(
         base_url=config.base_url,
         text=PROMPT_SEED,
@@ -69,15 +76,25 @@ async def build_prompt(config: BenchConfig) -> tuple[str, int | None]:
     if measured is None or measured <= 0:
         repeats = max(1, min(MAX_PROMPT_REPEATS, config.prompt_tokens // 40))
         text = PROMPT_SEED * repeats
-        return (text, None)
-    repeats = max(1, min(MAX_PROMPT_REPEATS, -(-config.prompt_tokens // measured)))
-    text = PROMPT_SEED * repeats
-    actual = await client.tokenize(
+    else:
+        repeats = max(1, min(MAX_PROMPT_REPEATS, -(-config.prompt_tokens // measured)))
+        text = PROMPT_SEED * repeats
+        actual = await client.tokenize(
+            base_url=config.base_url,
+            text=text,
+            api_key=config.api_key,
+        )
+        if actual is not None:
+            return (text, actual, "tokenize")
+    probed = await client.probe_prompt_tokens(
         base_url=config.base_url,
+        model=config.model,
         text=text,
         api_key=config.api_key,
     )
-    return (text, actual)
+    if probed is not None:
+        return (text, probed, "usage_probe")
+    return (text, None, "unmeasured")
 
 
 async def _one_request(
@@ -169,8 +186,8 @@ async def run_bench(config: BenchConfig) -> BenchResult:
     """Run the warmup and every level, then validate the result."""
     if not config.concurrency or any(level < 1 for level in config.concurrency):
         raise ValueError("concurrency levels must be positive")
-    prompt, prompt_tokens = await build_prompt(config)
-    result = BenchResult(prompt_tokens=prompt_tokens)
+    prompt, prompt_tokens, prompt_tokens_source = await build_prompt(config)
+    result = BenchResult(prompt_tokens=prompt_tokens, prompt_tokens_source=prompt_tokens_source)
     warmup = asyncio.Semaphore(1)
     for _ in range(max(0, config.warmup)):
         await _one_request(config, prompt, warmup)

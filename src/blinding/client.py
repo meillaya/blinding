@@ -21,6 +21,7 @@ TOKENIZE_PATH = "/tokenize"
 MODELS_PATH = "/v1/models"
 DEFAULT_TIMEOUT_S = 180.0
 STREAM_READ_TIMEOUT_S = 300.0
+PROBE_TIMEOUT_S = 30.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,11 +64,21 @@ class _StreamState:
     done: bool = False
 
 
+def _auth_headers(api_key: str | None) -> dict[str, str]:
+    return {"Authorization": f"Bearer {api_key}"} if api_key else {}
+
+
 def _headers(api_key: str | None) -> dict[str, str]:
-    headers = {"Content-Type": "application/json", "Accept": "text/event-stream"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-    return headers
+    return {
+        "Content-Type": "application/json",
+        "Accept": "text/event-stream",
+        **_auth_headers(api_key),
+    }
+
+
+def _without_stream_options(body: dict[str, Any]) -> dict[str, Any]:
+    """A copy of the request body with the stream_options key removed."""
+    return {key: value for key, value in body.items() if key != "stream_options"}
 
 
 def _usage_counts(payload: dict[str, Any]) -> tuple[int | None, int | None]:
@@ -141,7 +152,11 @@ async def stream_chat(
     api_key: str | None = None,
     timeout_s: float = DEFAULT_TIMEOUT_S,
 ) -> StreamSample:
-    """Send one streamed chat request and time its content chunks."""
+    """Send one streamed chat request and time its content chunks.
+
+    A server may answer HTTP 400 for the stream_options key, so a first 400 is
+    retried once without it. A second failure keeps the plain error sample.
+    """
     started = time.perf_counter()
     state = _StreamState()
     body: dict[str, Any] = {
@@ -153,41 +168,45 @@ async def stream_chat(
         "stream_options": {"include_usage": True},
     }
     timeout = httpx.Timeout(timeout_s, read=STREAM_READ_TIMEOUT_S)
+    url = base_url.rstrip("/") + CHAT_PATH
     try:
-        async with (
-            httpx.AsyncClient(timeout=timeout) as client,
-            client.stream(
-                "POST",
-                base_url.rstrip("/") + CHAT_PATH,
-                json=body,
-                headers=_headers(api_key),
-            ) as response,
-        ):
-            status = response.status_code
-            if status != httpx.codes.OK:
-                detail = (await response.aread()).decode("utf-8", errors="replace")
-                ended = time.perf_counter()
-                return StreamSample(
-                    ok=False,
-                    status=status,
-                    text="",
-                    ttft_ms=0.0,
-                    itl_ms=(),
-                    latency_ms=(ended - started) * 1000.0,
-                    completion_tokens=0,
-                    prompt_tokens=None,
-                    chunks=0,
-                    error=f"HTTP {status}: {detail[:200]}",
-                )
-            async for line in response.aiter_lines():
-                stripped = line.strip()
-                if not stripped.startswith("data:"):
-                    continue
-                data = stripped[5:].strip()
-                if data == "[DONE]":
-                    state.done = True
-                    continue
-                _consume_event(state, data, time.perf_counter())
+        async with httpx.AsyncClient(timeout=timeout) as http:
+            for attempt in range(2):
+                attempt_body = body if attempt == 0 else _without_stream_options(body)
+                async with http.stream(
+                    "POST",
+                    url,
+                    json=attempt_body,
+                    headers=_headers(api_key),
+                ) as response:
+                    status = response.status_code
+                    if status == httpx.codes.BAD_REQUEST and attempt == 0:
+                        continue
+                    if status != httpx.codes.OK:
+                        detail = (await response.aread()).decode("utf-8", errors="replace")
+                        ended = time.perf_counter()
+                        return StreamSample(
+                            ok=False,
+                            status=status,
+                            text="",
+                            ttft_ms=0.0,
+                            itl_ms=(),
+                            latency_ms=(ended - started) * 1000.0,
+                            completion_tokens=0,
+                            prompt_tokens=None,
+                            chunks=0,
+                            error=f"HTTP {status}: {detail[:200]}",
+                        )
+                    async for line in response.aiter_lines():
+                        stripped = line.strip()
+                        if not stripped.startswith("data:"):
+                            continue
+                        data = stripped[5:].strip()
+                        if data == "[DONE]":
+                            state.done = True
+                            continue
+                        _consume_event(state, data, time.perf_counter())
+                    break
     except httpx.HTTPError as exc:
         ended = time.perf_counter()
         return StreamSample(
@@ -305,6 +324,55 @@ async def tokenize(
         return None
     tokens = payload.get("tokens")
     return len(tokens) if isinstance(tokens, list) else None
+
+
+async def probe_prompt_tokens(
+    *,
+    base_url: str,
+    model: str,
+    text: str,
+    api_key: str | None = None,
+    timeout_s: float = PROBE_TIMEOUT_S,
+) -> int | None:
+    """Prompt token count from one non-streamed request's usage block.
+
+    Some OpenAI-compatible servers do not serve /tokenize. A single-token chat
+    completion still reports the prompt count. Every failure maps to None: the
+    benchmark records the count as unmeasured and keeps going.
+    """
+    body = {
+        "model": model,
+        "messages": [{"role": "user", "content": text}],
+        "max_tokens": 1,
+        "temperature": 0.0,
+        "stream": False,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=timeout_s) as client:
+            response = await client.post(
+                base_url.rstrip("/") + CHAT_PATH,
+                json=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    **_auth_headers(api_key),
+                },
+            )
+    except httpx.HTTPError:
+        return None
+    if response.status_code != httpx.codes.OK:
+        return None
+    try:
+        payload: Any = response.json()
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    usage = payload.get("usage")
+    if not isinstance(usage, dict):
+        return None
+    prompt = usage.get("prompt_tokens")
+    return int(prompt) if isinstance(prompt, int) else None
 
 
 async def server_models(base_url: str, api_key: str | None = None) -> list[str]:

@@ -10,15 +10,18 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from blinding import __version__, doctor, proc
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 GIT_TIMEOUT_S = 15.0
 SLUG_PATTERN = re.compile(r"[^a-z0-9._-]+")
+SECRET_URL_PATTERN = re.compile(r"(https?://)[^/@\s]+@")
+API_KEY_FLAG = "--api-key"
 MAX_TABLE_CELL = 80
 
 
@@ -91,6 +94,30 @@ def new_run_dir(results_root: Path, command: str, slug: str) -> Path:
     return candidate
 
 
+def sanitize_argv(argv: Sequence[str]) -> list[str]:
+    """Copy an argument list with API keys and URL credentials redacted.
+
+    The run record stays useful evidence without carrying a secret a later
+    commit or paste would publish.
+    """
+    cleaned: list[str] = []
+    redact_next = False
+    for item in argv:
+        if redact_next:
+            cleaned.append("***")
+            redact_next = False
+            continue
+        if item == API_KEY_FLAG:
+            cleaned.append(item)
+            redact_next = True
+            continue
+        if item.startswith(API_KEY_FLAG + "="):
+            cleaned.append(API_KEY_FLAG + "=***")
+            continue
+        cleaned.append(SECRET_URL_PATTERN.sub(r"\1***@", item))
+    return cleaned
+
+
 def build_record(
     *,
     command: str,
@@ -105,19 +132,26 @@ def build_record(
     artifacts: dict[str, str],
     started_at: str,
     duration_s: float,
+    devices: list[dict[str, Any]] | None = None,
 ) -> dict[str, object]:
-    """Assemble the common run record shape."""
+    """Assemble the common run record shape.
+
+    `devices` overrides local device discovery. Endpoint runs record an empty
+    list because the measured server is not on this host.
+    """
     return {
         "schema_version": SCHEMA_VERSION,
         "blinding_version": __version__,
         "command": command,
-        "argv": argv,
+        "argv": sanitize_argv(argv),
         "started_at": started_at,
         "duration_s": round(duration_s, 3),
         "git": git_info(root),
         "host": doctor.host_info().as_dict(),
         "tools": tool_info(tools),
-        "devices": [device.as_dict() for device in doctor.discover_devices(tools)],
+        "devices": [device.as_dict() for device in doctor.discover_devices(tools)]
+        if devices is None
+        else devices,
         "model": model,
         "config": config,
         "workload": workload,
@@ -175,7 +209,9 @@ def list_runs(results_root: Path) -> list[dict[str, Any]]:
 
 
 def find_run(results_root: Path, selector: str) -> dict[str, Any]:
-    """Find a run by directory name or unique prefix."""
+    """Find a run by directory name, unique prefix, `latest`, or `latest:<command>`."""
+    if selector == "latest" or selector.startswith("latest:"):
+        return _find_latest(results_root, selector)
     runs = list_runs(results_root)
     exact = [run for run in runs if Path(str(run["run_dir"])).name == selector]
     if exact:
@@ -187,6 +223,20 @@ def find_run(results_root: Path, selector: str) -> dict[str, Any]:
         raise ValueError(f"no run matches {selector!r}")
     names = ", ".join(Path(str(run["run_dir"])).name for run in partial)
     raise ValueError(f"ambiguous run {selector!r}; matches: {names}")
+
+
+def _find_latest(results_root: Path, selector: str) -> dict[str, Any]:
+    runs = list_runs(results_root)
+    command = ""
+    if ":" in selector:
+        _, _, command = selector.partition(":")
+        if not command:
+            raise ValueError(f"{selector!r} needs a command after the colon")
+    if command:
+        runs = [run for run in runs if run.get("command") == command]
+    if not runs:
+        raise ValueError(f"no runs match {selector!r}")
+    return runs[0]
 
 
 def metric_value(run: dict[str, Any], key: str) -> Any:

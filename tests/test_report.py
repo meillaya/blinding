@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from blinding import proc, report
 
 
@@ -63,3 +65,63 @@ def test_find_run_by_prefix(tmp_path: Path) -> None:
     found = report.find_run(tmp_path, run_dir.name[:16])
     assert Path(str(found["run_dir"])).name == run_dir.name
     assert json.loads((run_dir / "run.json").read_text())["command"] == "eval"
+
+
+def test_sanitize_argv_redacts_secrets() -> None:
+    """API keys and URL credentials never reach the run record."""
+    argv = [
+        "blinding",
+        "bench",
+        "--api-key",
+        "secret-value",
+        "--url",
+        "https://user:pass@example.invalid/v1",
+        "--api-key=inline-secret",
+    ]
+    cleaned = report.sanitize_argv(argv)
+    joined = " ".join(cleaned)
+    assert "secret-value" not in joined
+    assert "inline-secret" not in joined
+    assert "user:pass" not in joined
+    assert "***" in joined
+
+
+def test_build_record_can_override_devices(tmp_path: Path) -> None:
+    """Endpoint runs record no local device discovery."""
+    record = report.build_record(
+        command="bench",
+        argv=["blinding", "bench"],
+        root=tmp_path,
+        tools=_tools(),
+        model={"id": "tiny", "source": "endpoint"},
+        config=None,
+        devices=[],
+        workload={},
+        metrics={},
+        validity={"valid": True, "reasons": []},
+        artifacts={},
+        started_at=report.utc_iso(),
+        duration_s=0.0,
+    )
+    assert record["devices"] == []
+    assert record["schema_version"] == report.SCHEMA_VERSION
+
+
+def test_find_run_latest_selectors(tmp_path: Path) -> None:
+    """latest picks the newest run and latest:<command> filters by command."""
+    for name, command in (
+        ("20261114T120000Z-bench-a", "bench"),
+        ("20261114T130000Z-bench-b", "bench"),
+        ("20261114T140000Z-kernel-c", "kernel"),
+    ):
+        run_dir = tmp_path / name
+        run_dir.mkdir()
+        (run_dir / "run.json").write_text(
+            json.dumps({"command": command, "validity": {"valid": True}}), encoding="utf-8"
+        )
+    latest = report.find_run(tmp_path, "latest")
+    assert Path(str(latest["run_dir"])).name == "20261114T140000Z-kernel-c"
+    latest_bench = report.find_run(tmp_path, "latest:bench")
+    assert Path(str(latest_bench["run_dir"])).name == "20261114T130000Z-bench-b"
+    with pytest.raises(ValueError):
+        report.find_run(tmp_path, "latest:eval")

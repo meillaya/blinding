@@ -1,16 +1,25 @@
-# Input configuration for devenv. The shell itself is declared in devenv.nix.
+# Input configuration for devenv. The shell itself is declared in devenv.nix,
+# and flake.nix exposes that module to nix develop.
 #
 # nixpkgs is pinned to the rolling branch the other house projects use.
 # languages.python.version needs the nixpkgs-python input. That input follows
 # the pinned nixpkgs, so the shell fetches one nixpkgs and one Python.
+#
+# The devenv input names the release tag flake.nix pins, and devenv update
+# writes its revision to devenv.lock.
 
-require_version: ">=2.1"
+require_version: ">=2.4"
 
 inputs:
   nixpkgs:
     url: github:cachix/devenv-nixpkgs/rolling
   nixpkgs-python:
     url: github:cachix/nixpkgs-python
+    inputs:
+      nixpkgs:
+        follows: nixpkgs
+  devenv:
+    url: github:cachix/devenv/v2.4.0
     inputs:
       nixpkgs:
         follows: nixpkgs

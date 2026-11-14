@@ -3,6 +3,11 @@
 .devenv/
 .env
 
+# Nix
+.direnv/
+result
+result-*
+
 # Python
 .venv/
 __pycache__/

@@ -12,6 +12,9 @@
 # devenv keeps the environment under .devenv/state, exports it as
 # UV_PROJECT_ENVIRONMENT, and activates it, so the make targets reach their
 # tools through uv run.
+#
+# flake.nix passes this file to devenv.lib.mkShell, so nix develop and
+# devenv shell open the same environment.
 
 { pkgs, config, ... }:
 
@@ -33,6 +36,7 @@
     curl
     git
     gnumake
+    nixfmt-rfc-style
     podman
   ];
 

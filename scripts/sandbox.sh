@@ -29,14 +29,21 @@ if ! command -v podman >/dev/null 2>&1; then
 fi
 
 ensure_config() {
-    mkdir -p "$HOME/.config/containers"
+    # Podman reads the containers config from XDG_CONFIG_HOME when it is set,
+    # and this script points XDG_CONFIG_HOME at the workspace. Keep the HOME
+    # copy as well for invocations that ignore the XDG override.
+    mkdir -p "$XDG_CONFIG_HOME/containers" "$HOME/.config/containers"
+    cp -f "$ROOT/sandbox/containers/policy.json" "$XDG_CONFIG_HOME/containers/policy.json"
+    cp -f "$ROOT/sandbox/containers/registries.conf" \
+        "$XDG_CONFIG_HOME/containers/registries.conf"
     cp -f "$ROOT/sandbox/containers/policy.json" "$HOME/.config/containers/policy.json"
     cp -f "$ROOT/sandbox/containers/registries.conf" "$HOME/.config/containers/registries.conf"
 }
 
 PODMAN=(podman --root "$SANDBOX/containers" --runroot "$SANDBOX/run")
-if [[ -f "$SANDBOX/storage-driver" ]]; then
-    PODMAN+=(--storage-driver "$(cat "$SANDBOX/storage-driver")")
+STORAGE_DRIVER_FILE="$SANDBOX/storage-driver"
+if [[ -f "$STORAGE_DRIVER_FILE" ]]; then
+    PODMAN+=(--storage-driver "$(cat "$STORAGE_DRIVER_FILE")")
 fi
 
 usage() {
@@ -96,10 +103,31 @@ run_container() {
 
 cmd_init() {
     ensure_config
+    # Podman records an empty graph driver when it auto-detects one, and every
+    # later call that passes the recorded driver then fails with a mismatch.
+    # Detect the driver in a throwaway store, then create the real store with
+    # the driver flag so the database and the recorded value agree.
+    if [[ ! -f "$SANDBOX/containers/db.sql" ]]; then
+        local probe="$SANDBOX/store-probe"
+        local detected
+        rm -rf "$probe"
+        mkdir -p "$probe/root" "$probe/run"
+        detected="$(podman --root "$probe/root" --runroot "$probe/run" \
+            info --format '{{.Store.GraphDriverName}}')"
+        rm -rf "$probe"
+        podman --root "$SANDBOX/containers" --runroot "$SANDBOX/run" \
+            --storage-driver "$detected" info >/dev/null
+        printf '%s\n' "$detected" >"$STORAGE_DRIVER_FILE"
+        PODMAN=(podman --root "$SANDBOX/containers" --runroot "$SANDBOX/run" \
+            --storage-driver "$detected")
+    fi
     "${PODMAN[@]}" info >/dev/null
     local driver
-    driver="$("${PODMAN[@]}" info --format '{{.Store.GraphDriverName}}')"
-    printf '%s\n' "$driver" >"$SANDBOX/storage-driver"
+    if [[ -f "$STORAGE_DRIVER_FILE" ]]; then
+        driver="$(cat "$STORAGE_DRIVER_FILE")"
+    else
+        driver="$("${PODMAN[@]}" info --format '{{.Store.GraphDriverName}}')"
+    fi
     echo "store    $SANDBOX/containers"
     echo "driver   $driver"
     echo "kfd      $([[ -e /dev/kfd ]] && echo present || echo absent)"

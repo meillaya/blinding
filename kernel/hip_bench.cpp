@@ -6,6 +6,12 @@
  * without printing a partial object, so a broken run cannot be mistaken for a
  * slow one.
  *
+ * The copy section can try more than one access shape. A variant name reads
+ * vecN-iM-wW: N floats per load, M loads per thread per grid step, and W waves
+ * of resident blocks per compute unit. The default vec4-i1-w4 is a 16-byte
+ * grid-stride copy with four waves, the shape the first measurements used.
+ * --autotune-copy times every combination and reports the best one per block.
+ *
  * Build inside the ROCm image:
  *
  *   hipcc -O3 -std=c++17 -o /usr/local/bin/blinding-hip-bench \
@@ -21,6 +27,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
@@ -54,9 +61,20 @@ constexpr int kTimedIterations = 7;
 constexpr std::size_t kCopyMovedBytes = 256ull * 1024ull * 1024ull;
 constexpr std::size_t kCopyBufferBytes = kCopyMovedBytes / 2;
 
-// Keep several waves resident per compute unit. One wave leaves the memory
-// system idle while the last workgroup retires, which drags the average down.
-constexpr int kCopyWavesPerCu = 4;
+// The copy correctness check pulls three windows of the destination back to the
+// host. The first, middle, and last covered floats catch a wrong stride and a
+// grid that misses the end of the buffer.
+constexpr std::size_t kCopyCheckFloats = 4096;
+
+// Autotune compares the variants against each other, so every one has to start
+// from the same clock state. The memory clock spends the first several seconds
+// of load in its low state, and without this pass the first variant measured
+// loses to every later one. The default copy shape moves 256 MiB per launch,
+// so this pass is roughly eight seconds of full-bandwidth traffic.
+constexpr int kAutotuneWarmupIterations = 16;
+
+// JSON schema 2 added per-row samples and made the copy variant explicit.
+constexpr int kBenchSchema = 2;
 
 constexpr int kMaxBlockSize = 1024;
 constexpr int kMaxProblemSize = 16384;
@@ -231,16 +249,75 @@ std::string next_value(int argc, char** argv, int& index, const std::string& fla
     return argv[index];
 }
 
+// The copy kernel is a template over two of the three variant numbers, so the
+// access width and the per-thread item count cost no branch in the hot loop.
+struct CopyVariant {
+    int vector_width;
+    int items_per_thread;
+    int waves_per_cu;
+    std::string name;
+};
+
+std::string copy_variant_name(int vector_width, int items_per_thread, int waves_per_cu) {
+    return "vec" + std::to_string(vector_width) + "-i" + std::to_string(items_per_thread) +
+           "-w" + std::to_string(waves_per_cu);
+}
+
+CopyVariant parse_copy_variant(const std::string& text) {
+    int vector_width = 0;
+    int items_per_thread = 0;
+    int waves_per_cu = 0;
+    int consumed = 0;
+    const int matched = std::sscanf(text.c_str(), "vec%d-i%d-w%d%n", &vector_width,
+                                    &items_per_thread, &waves_per_cu, &consumed);
+    if (matched != 3 || consumed != static_cast<int>(text.size())) {
+        fail("unknown copy variant " + text +
+                 "; expected vecN-iM-wW with N in {2,4}, M in {1,2,4}, and W in {1,2,4}",
+             kExitUsage);
+    }
+    const bool known_width = vector_width == 2 || vector_width == 4;
+    const bool known_items = items_per_thread == 1 || items_per_thread == 2 ||
+                             items_per_thread == 4;
+    const bool known_waves = waves_per_cu == 1 || waves_per_cu == 2 || waves_per_cu == 4;
+    if (!known_width || !known_items || !known_waves) {
+        fail("copy variant " + text +
+                 " is outside the supported values; expected vecN-iM-wW with N in {2,4}, M "
+                 "in {1,2,4}, and W in {1,2,4}",
+             kExitUsage);
+    }
+    return CopyVariant{vector_width, items_per_thread, waves_per_cu,
+                       copy_variant_name(vector_width, items_per_thread, waves_per_cu)};
+}
+
+std::vector<CopyVariant> all_copy_variants() {
+    std::vector<CopyVariant> variants;
+    for (const int vector_width : {2, 4}) {
+        for (const int items_per_thread : {1, 2, 4}) {
+            for (const int waves_per_cu : {1, 2, 4}) {
+                variants.push_back(CopyVariant{
+                    vector_width, items_per_thread, waves_per_cu,
+                    copy_variant_name(vector_width, items_per_thread, waves_per_cu)});
+            }
+        }
+    }
+    return variants;
+}
+
+constexpr const char* kDefaultCopyVariant = "vec4-i1-w4";
+
 struct Options {
     std::vector<int> blocks{128, 256, 512, 1024};
     std::vector<int> sizes{1024, 2048, 4096};
     std::vector<std::string> dtypes{"fp32", "fp16"};
     std::vector<std::string> layouts{"nn", "nt", "tn"};
+    std::vector<CopyVariant> copy_variants{{4, 1, 4, kDefaultCopyVariant}};
+    bool autotune_copy = false;
 };
 
 void print_usage(std::ostream& stream) {
     stream << "usage: " << kProgramName << " [--json] [--blocks 128,256,512,1024]\n"
-           << "       [--sizes 1024,2048,4096] [--dtype fp16,fp32] [--layouts nn,nt,tn]\n";
+           << "       [--sizes 1024,2048,4096] [--dtype fp16,fp32] [--layouts nn,nt,tn]\n"
+           << "       [--copy-variants vec4-i1-w4,...] [--autotune-copy]\n";
 }
 
 std::vector<int> parse_int_list(const std::string& text, const std::string& flag) {
@@ -316,6 +393,14 @@ Options parse_options(int argc, char** argv) {
             options.dtypes = parse_string_list(next_value(argc, argv, index, argument), argument);
         } else if (argument == "--layouts") {
             options.layouts = parse_string_list(next_value(argc, argv, index, argument), argument);
+        } else if (argument == "--copy-variants") {
+            options.copy_variants.clear();
+            for (const std::string& item :
+                 parse_string_list(next_value(argc, argv, index, argument), argument)) {
+                options.copy_variants.push_back(parse_copy_variant(item));
+            }
+        } else if (argument == "--autotune-copy") {
+            options.autotune_copy = true;
         } else if (argument == "--help" || argument == "-h") {
             print_usage(std::cout);
             std::exit(0);
@@ -333,20 +418,38 @@ Options parse_options(int argc, char** argv) {
 static_assert(sizeof(__half) == sizeof(rocblas_half),
               "rocBLAS half precision must stay 16 bits wide");
 
-// 16-byte accesses keep this kernel memory bound instead of instruction bound:
-// the bus, not the scheduler, sets the time. The grid-stride loop lets a small
-// grid cover a buffer that is far larger than one full occupancy wave.
+// 16-byte accesses keep the default kernel memory bound instead of instruction
+// bound: the bus, not the scheduler, sets the time. The grid-stride loop lets a
+// small grid cover a buffer that is far larger than one full occupancy wave.
+// The items-per-thread path keeps each step stamped out away from the buffer
+// position of its neighbours so every load in a warp stays coalesced.
+template <int VectorWidth, int ItemsPerThread>
 __global__ void copy_kernel(const float* __restrict__ source, float* __restrict__ destination,
                             std::size_t count) {
-    const std::size_t vector_count = count / 4;
-    const float4* source_vectors = reinterpret_cast<const float4*>(source);
-    float4* destination_vectors = reinterpret_cast<float4*>(destination);
+    using Vector = std::conditional_t<VectorWidth == 4, float4, float2>;
+    const std::size_t vector_count = count / VectorWidth;
+    const Vector* source_vectors = reinterpret_cast<const Vector*>(source);
+    Vector* destination_vectors = reinterpret_cast<Vector*>(destination);
     const std::size_t thread = static_cast<std::size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
     const std::size_t stride = static_cast<std::size_t>(blockDim.x) * gridDim.x;
-    for (std::size_t index = thread; index < vector_count; index += stride) {
-        destination_vectors[index] = source_vectors[index];
+    if constexpr (ItemsPerThread == 1) {
+        for (std::size_t index = thread; index < vector_count; index += stride) {
+            destination_vectors[index] = source_vectors[index];
+        }
+    } else {
+        for (std::size_t index = thread; index < vector_count;
+             index += stride * ItemsPerThread) {
+#pragma unroll
+            for (int item = 0; item < ItemsPerThread; ++item) {
+                const std::size_t offset = index + static_cast<std::size_t>(item) * stride;
+                if (offset < vector_count) {
+                    destination_vectors[offset] = source_vectors[offset];
+                }
+            }
+        }
     }
-    for (std::size_t index = vector_count * 4 + thread; index < count; index += stride) {
+    for (std::size_t index = vector_count * VectorWidth + thread; index < count;
+         index += stride) {
         destination[index] = source[index];
     }
 }
@@ -407,10 +510,97 @@ void fill_device(T* data, std::size_t count) {
     check_hip(hipGetLastError(), "fill_kernel launch");
 }
 
-void launch_copy(const float* source, float* destination, std::size_t count, int block,
-                 int grid) {
-    copy_kernel<<<grid, block>>>(source, destination, count);
+template <int VectorWidth, int ItemsPerThread>
+void launch_copy_typed(const float* source, float* destination, std::size_t count, int block,
+                       int grid) {
+    copy_kernel<VectorWidth, ItemsPerThread><<<grid, block>>>(source, destination, count);
     check_hip(hipGetLastError(), "copy_kernel launch");
+}
+
+void launch_copy(const CopyVariant& variant, const float* source, float* destination,
+                 std::size_t count, int block, int grid) {
+    if (variant.vector_width == 2) {
+        if (variant.items_per_thread == 1) {
+            launch_copy_typed<2, 1>(source, destination, count, block, grid);
+        } else if (variant.items_per_thread == 2) {
+            launch_copy_typed<2, 2>(source, destination, count, block, grid);
+        } else {
+            launch_copy_typed<2, 4>(source, destination, count, block, grid);
+        }
+    } else {
+        if (variant.items_per_thread == 1) {
+            launch_copy_typed<4, 1>(source, destination, count, block, grid);
+        } else if (variant.items_per_thread == 2) {
+            launch_copy_typed<4, 2>(source, destination, count, block, grid);
+        } else {
+            launch_copy_typed<4, 4>(source, destination, count, block, grid);
+        }
+    }
+}
+
+// The grid follows the device instead of a guessed constant: enough resident
+// workgroups to fill every compute unit W times over, but never more blocks
+// than there is vector work to hand out. A thread handles M vectors per grid
+// step, so one pass of the grid covers block * M vectors.
+int copy_grid(const CopyVariant& variant, const hipDeviceProp_t& properties,
+              std::size_t element_count, int block) {
+    const std::size_t vector_count = element_count / static_cast<std::size_t>(variant.vector_width);
+    const int threads_per_cu =
+        properties.maxThreadsPerMultiProcessor > 0 ? properties.maxThreadsPerMultiProcessor : 2048;
+    const std::size_t resident_blocks = static_cast<std::size_t>(properties.multiProcessorCount) *
+                                        static_cast<std::size_t>(threads_per_cu);
+    const std::size_t per_step = static_cast<std::size_t>(block) *
+                                 static_cast<std::size_t>(variant.items_per_thread);
+    const std::size_t resident = resident_blocks / static_cast<std::size_t>(block);
+    const std::size_t grid = std::max<std::size_t>(
+        1, std::min(ceil_div(vector_count, per_step),
+                    resident * static_cast<std::size_t>(variant.waves_per_cu)));
+    return static_cast<int>(grid);
+}
+
+// The source buffer is filled from a known pattern and the destination is
+// zeroed before the copy, so a kernel that writes nothing cannot pass. Pulling
+// the same windows back from both buffers compares exactly what the copy was
+// asked to move.
+void check_copy_correctness(const CopyVariant& variant, const hipDeviceProp_t& properties,
+                            const float* source, float* destination, std::size_t element_count,
+                            int block) {
+    check_hip(hipMemset(destination, 0, element_count * sizeof(float)), "hipMemset");
+    const int grid = copy_grid(variant, properties, element_count, block);
+    launch_copy(variant, source, destination, element_count, block, grid);
+    check_hip(hipDeviceSynchronize(), "hipDeviceSynchronize");
+    const std::size_t sample_count = std::min<std::size_t>(kCopyCheckFloats, element_count);
+    const std::vector<std::size_t> offsets = {0, element_count / 2,
+                                              element_count - sample_count};
+    const std::size_t sample_bytes = sample_count * sizeof(float);
+    std::vector<float> host_source(sample_count);
+    std::vector<float> host_destination(sample_count);
+    for (const std::size_t offset : offsets) {
+        check_hip(hipMemcpy(host_source.data(), source + offset, sample_bytes,
+                            hipMemcpyDeviceToHost),
+                  "hipMemcpy");
+        check_hip(hipMemcpy(host_destination.data(), destination + offset, sample_bytes,
+                            hipMemcpyDeviceToHost),
+                  "hipMemcpy");
+        for (std::size_t index = 0; index < sample_count; ++index) {
+            if (std::memcmp(&host_source[index], &host_destination[index], sizeof(float)) != 0) {
+                fail("copy correctness check failed for variant " + variant.name +
+                     " at float offset " + std::to_string(offset + index) +
+                     ": the destination does not match the source");
+            }
+        }
+    }
+    std::cerr << kProgramName << ": copy variant " << variant.name << " verified\n";
+}
+
+void require_variant_checked(const CopyVariant& variant, const hipDeviceProp_t& properties,
+                             const float* source, float* destination, std::size_t element_count,
+                             int block, std::vector<std::string>& checked) {
+    if (std::find(checked.begin(), checked.end(), variant.name) != checked.end()) {
+        return;
+    }
+    check_copy_correctness(variant, properties, source, destination, element_count, block);
+    checked.push_back(variant.name);
 }
 
 // Enqueues every timed launch before synchronizing. Waiting between iterations
@@ -437,21 +627,23 @@ public:
     EventTimer(const EventTimer&) = delete;
     EventTimer& operator=(const EventTimer&) = delete;
 
+    // Per-iteration wall time. The mean of these values is what the printed
+    // rate uses, and the values themselves become the row samples.
     template <typename Launch>
-    double mean_seconds(Launch launch) {
+    std::vector<double> timed_seconds(Launch launch) {
         for (std::size_t index = 0; index < starts_.size(); ++index) {
             HIP_CHECK(hipEventRecord(starts_[index]));
             launch();
             HIP_CHECK(hipEventRecord(stops_[index]));
         }
-        double total_ms = 0.0;
+        std::vector<double> seconds(starts_.size(), 0.0);
         for (std::size_t index = 0; index < starts_.size(); ++index) {
             HIP_CHECK(hipEventSynchronize(stops_[index]));
             float elapsed_ms = 0.0f;
             HIP_CHECK(hipEventElapsedTime(&elapsed_ms, starts_[index], stops_[index]));
-            total_ms += static_cast<double>(elapsed_ms);
+            seconds[index] = static_cast<double>(elapsed_ms) / 1000.0;
         }
-        return total_ms / 1000.0 / static_cast<double>(kTimedIterations);
+        return seconds;
     }
 
 private:
@@ -467,9 +659,30 @@ void warm_up(Launch launch) {
     HIP_CHECK(hipDeviceSynchronize());
 }
 
+double mean_value(const std::vector<double>& values) {
+    double total = 0.0;
+    for (const double value : values) {
+        total += value;
+    }
+    return total / static_cast<double>(values.size());
+}
+
+void require_timing(const std::vector<double>& seconds, const std::string& what) {
+    if (seconds.empty()) {
+        fail("the timer reported no intervals for " + what);
+    }
+    for (const double value : seconds) {
+        if (!(value > 0.0) || !std::isfinite(value)) {
+            fail("the timer reported a non-positive interval for " + what);
+        }
+    }
+}
+
 struct CopyResult {
     int block;
+    std::string variant;
     double gbps;
+    std::vector<double> samples;
 };
 
 struct GemmResult {
@@ -477,10 +690,38 @@ struct GemmResult {
     std::string layout;
     int size;
     double gflops;
+    std::vector<double> samples;
 };
 
-void benchmark_copy(const hipDeviceProp_t& properties, const std::vector<int>& blocks,
-                    EventTimer& timer, std::vector<CopyResult>& results) {
+struct AutotuneResult {
+    int block;
+    std::string variant;
+    double gbps;
+};
+
+CopyResult measure_copy(const CopyVariant& variant, const hipDeviceProp_t& properties,
+                        const float* source, float* destination, std::size_t element_count,
+                        int block, EventTimer& timer) {
+    const int grid = copy_grid(variant, properties, element_count, block);
+    warm_up([&]() { launch_copy(variant, source, destination, element_count, block, grid); });
+    const std::vector<double> seconds = timer.timed_seconds([&]() {
+        launch_copy(variant, source, destination, element_count, block, grid);
+    });
+    require_timing(seconds, "copy variant " + variant.name + " at block " +
+                                std::to_string(block));
+    CopyResult result;
+    result.block = block;
+    result.variant = variant.name;
+    result.gbps = static_cast<double>(kCopyMovedBytes) / mean_value(seconds) / kGiga;
+    for (const double value : seconds) {
+        result.samples.push_back(static_cast<double>(kCopyMovedBytes) / value / kGiga);
+    }
+    return result;
+}
+
+void benchmark_copy(const hipDeviceProp_t& properties, const Options& options,
+                    EventTimer& timer, std::vector<CopyResult>& results,
+                    std::vector<AutotuneResult>& autotune) {
     const std::size_t element_count = kCopyBufferBytes / sizeof(float);
     require_device_memory(kCopyBufferBytes * 2, "the copy buffers");
     float* source = device_allocate<float>(element_count);
@@ -488,30 +729,48 @@ void benchmark_copy(const hipDeviceProp_t& properties, const std::vector<int>& b
     fill_device(source, element_count);
     HIP_CHECK(hipDeviceSynchronize());
 
-    const std::size_t vector_count = element_count / 4;
-    const int threads_per_cu =
-        properties.maxThreadsPerMultiProcessor > 0 ? properties.maxThreadsPerMultiProcessor : 2048;
-    const std::size_t resident_blocks = static_cast<std::size_t>(properties.multiProcessorCount) *
-                                        static_cast<std::size_t>(threads_per_cu);
-
-    for (const int block : blocks) {
-        // The grid follows the device instead of a guessed constant: enough
-        // resident workgroups to fill every compute unit several times over,
-        // but never more blocks than there is vector work to hand out.
-        const std::size_t resident = resident_blocks / static_cast<std::size_t>(block);
-        const std::size_t grid =
-            std::max<std::size_t>(1, std::min(ceil_div(vector_count, static_cast<std::size_t>(block)),
-                                              resident * static_cast<std::size_t>(kCopyWavesPerCu)));
-        warm_up([&]() { launch_copy(source, destination, element_count, block, static_cast<int>(grid)); });
-        const double seconds = timer.mean_seconds([&]() {
-            launch_copy(source, destination, element_count, block, static_cast<int>(grid));
-        });
-        if (!(seconds > 0.0) || !std::isfinite(seconds)) {
-            fail("the copy timer reported a non-positive interval for block size " +
-                 std::to_string(block));
+    if (options.autotune_copy) {
+        std::cerr << kProgramName << ": autotune warming the device for "
+                  << kAutotuneWarmupIterations << " copy iterations\n";
+        const CopyVariant warmup_variant{4, 1, 4, kDefaultCopyVariant};
+        const int grid = copy_grid(warmup_variant, properties, element_count,
+                                   options.blocks.front());
+        for (int iteration = 0; iteration < kAutotuneWarmupIterations; ++iteration) {
+            launch_copy(warmup_variant, source, destination, element_count,
+                        options.blocks.front(), grid);
         }
-        const double gbps = static_cast<double>(kCopyMovedBytes) / seconds / kGiga;
-        results.push_back(CopyResult{block, gbps});
+        HIP_CHECK(hipDeviceSynchronize());
+    }
+
+    const int check_block = options.blocks.front();
+    std::vector<std::string> checked;
+    for (const int block : options.blocks) {
+        for (const CopyVariant& variant : options.copy_variants) {
+            require_variant_checked(variant, properties, source, destination, element_count,
+                                    check_block, checked);
+            results.push_back(measure_copy(variant, properties, source, destination,
+                                           element_count, block, timer));
+        }
+        if (options.autotune_copy) {
+            AutotuneResult best{block, "", 0.0};
+            for (const CopyVariant& variant : all_copy_variants()) {
+                require_variant_checked(variant, properties, source, destination, element_count,
+                                        check_block, checked);
+                const CopyResult measured =
+                    measure_copy(variant, properties, source, destination, element_count, block,
+                                 timer);
+                if (measured.gbps > best.gbps) {
+                    best.variant = measured.variant;
+                    best.gbps = measured.gbps;
+                }
+            }
+            if (best.variant.empty()) {
+                fail("autotune failed to measure any variant at block " + std::to_string(block));
+            }
+            std::cerr << kProgramName << ": autotune block " << block << " best "
+                      << best.variant << " at " << json_number(best.gbps) << " GB/s\n";
+            autotune.push_back(best);
+        }
     }
 
     device_release(destination);
@@ -598,18 +857,23 @@ void benchmark_gemm(rocblas_handle handle, const std::string& dtype, const std::
             warm_up([&]() {
                 check_rocblas(launch_gemm<T>(handle, operation_a, operation_b, problem, a, b, c));
             });
-            const double seconds = timer.mean_seconds([&]() {
+            const std::vector<double> seconds = timer.timed_seconds([&]() {
                 check_rocblas(launch_gemm<T>(handle, operation_a, operation_b, problem, a, b, c));
             });
-            if (!(seconds > 0.0) || !std::isfinite(seconds)) {
-                fail("the GEMM timer reported a non-positive interval for " + dtype + " " +
-                     layout + " " + std::to_string(size));
-            }
+            require_timing(seconds, dtype + " " + layout + " " + std::to_string(size));
             // GEMM is 2 * M * N * K floating point operations, and M, N, and K
             // are all the problem size for these square cases.
             const double operations = 2.0 * static_cast<double>(elements) *
                                       static_cast<double>(size);
-            results.push_back(GemmResult{dtype, layout, size, operations / seconds / kGiga});
+            GemmResult result;
+            result.dtype = dtype;
+            result.layout = layout;
+            result.size = size;
+            result.gflops = operations / mean_value(seconds) / kGiga;
+            for (const double value : seconds) {
+                result.samples.push_back(operations / value / kGiga);
+            }
+            results.push_back(std::move(result));
         }
 
         device_release(c);
@@ -618,12 +882,25 @@ void benchmark_gemm(rocblas_handle handle, const std::string& dtype, const std::
     }
 }
 
+void render_samples(std::ostringstream& out, const std::vector<double>& samples) {
+    out << "[";
+    for (std::size_t index = 0; index < samples.size(); ++index) {
+        if (index != 0) {
+            out << ",";
+        }
+        out << json_number(samples[index]);
+    }
+    out << "]";
+}
+
 std::string render_json(const std::string& device, const std::string& gfx,
                         const std::string& rocm_version, const std::string& rocm_release,
                         const std::vector<CopyResult>& copy,
-                        const std::vector<GemmResult>& gemm) {
+                        const std::vector<GemmResult>& gemm,
+                        const std::vector<AutotuneResult>& autotune, bool emit_autotune) {
     std::ostringstream out;
-    out << "{\"device\":" << json_string(device) << ",\"gfx\":" << json_string(gfx)
+    out << "{\"bench_schema\":" << kBenchSchema << ",\"device\":" << json_string(device)
+        << ",\"gfx\":" << json_string(gfx)
         << ",\"rocm_version\":" << json_string(rocm_version);
     if (!rocm_release.empty()) {
         // The package release in /opt/rocm/.info/version is not always the
@@ -635,8 +912,11 @@ std::string render_json(const std::string& device, const std::string& gfx,
         if (index != 0) {
             out << ",";
         }
-        out << "{\"block\":" << copy[index].block << ",\"gbps\":" << json_number(copy[index].gbps)
-            << "}";
+        out << "{\"block\":" << copy[index].block
+            << ",\"variant\":" << json_string(copy[index].variant)
+            << ",\"gbps\":" << json_number(copy[index].gbps) << ",\"samples\":";
+        render_samples(out, copy[index].samples);
+        out << "}";
     }
     out << "],\"gemm\":[";
     for (std::size_t index = 0; index < gemm.size(); ++index) {
@@ -646,9 +926,24 @@ std::string render_json(const std::string& device, const std::string& gfx,
         out << "{\"dtype\":" << json_string(gemm[index].dtype)
             << ",\"layout\":" << json_string(gemm[index].layout)
             << ",\"size\":" << gemm[index].size
-            << ",\"gflops\":" << json_number(gemm[index].gflops) << "}";
+            << ",\"gflops\":" << json_number(gemm[index].gflops) << ",\"samples\":";
+        render_samples(out, gemm[index].samples);
+        out << "}";
     }
-    out << "],\"clocks\":{\"gpu_mhz\":null,\"power_w\":null},\"errors\":[]}";
+    out << "]";
+    if (emit_autotune) {
+        out << ",\"autotune\":[";
+        for (std::size_t index = 0; index < autotune.size(); ++index) {
+            if (index != 0) {
+                out << ",";
+            }
+            out << "{\"block\":" << autotune[index].block
+                << ",\"variant\":" << json_string(autotune[index].variant)
+                << ",\"gbps\":" << json_number(autotune[index].gbps) << "}";
+        }
+        out << "]";
+    }
+    out << ",\"clocks\":{\"gpu_mhz\":null,\"power_w\":null},\"errors\":[]}";
     return out.str();
 }
 
@@ -694,12 +989,13 @@ int main(int argc, char** argv) {
 
     std::vector<CopyResult> copy_results;
     std::vector<GemmResult> gemm_results;
+    std::vector<AutotuneResult> autotune_results;
     {
         rocblas_handle handle = nullptr;
         check_rocblas(rocblas_create_handle(&handle));
         check_rocblas(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host));
         EventTimer timer;
-        benchmark_copy(properties, options.blocks, timer, copy_results);
+        benchmark_copy(properties, options, timer, copy_results, autotune_results);
         for (const std::string& dtype : options.dtypes) {
             if (dtype == "fp32") {
                 benchmark_gemm<float>(handle, dtype, options.sizes, options.layouts, timer,
@@ -713,7 +1009,7 @@ int main(int argc, char** argv) {
     }
 
     std::cout << render_json(properties.name, gfx, rocm_version, rocm_release, copy_results,
-                             gemm_results)
+                             gemm_results, autotune_results, options.autotune_copy)
               << "\n";
     return 0;
 }

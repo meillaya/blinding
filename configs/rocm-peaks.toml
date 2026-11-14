@@ -1,0 +1,16 @@
+# Peak figures for the GPUs this lab measures, taken from the vendor spec sheet.
+# They are a denominator for the percent-of-peak column, not a measurement of
+# the machine in front of you.
+#
+# gfx1101 is the RX 7800 XT: 19.5 Gbps GDDR6 on a 256-bit bus, 60 compute units
+# at a 2.43 GHz boost clock.
+#
+# bandwidth_gbps = 19.5 Gbps * 256 bit / 8 = 624.0 GB/s
+# fp32_tflops = 60 CU * 128 lanes * 2 flop * 2.43 GHz = 37.3 TFLOPS
+# fp16_tflops = the packed half path runs at twice the fp32 rate = 74.6 TFLOPS
+
+[gfx1101]
+name = "AMD Radeon RX 7800 XT"
+bandwidth_gbps = 624.0
+fp32_tflops = 37.3
+fp16_tflops = 74.6

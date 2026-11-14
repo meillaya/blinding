@@ -20,6 +20,8 @@ from pathlib import Path
 CHECKED_SUFFIXES = {".md", ".rs", ".py", ".sh", ".nix", ".yml", ".toml", ".cpp"}
 
 SKIP_DIRS = {
+    ".devenv",
+    ".direnv",
     ".git",
     ".sandbox",
     ".venv",

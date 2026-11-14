@@ -5,3 +5,6 @@
 
 # Results are text data; keep one line ending on every host.
 *.csv text eol=lf
+
+# Run records under results/ are generated artifacts, not source.
+results/** linguist-generated=true

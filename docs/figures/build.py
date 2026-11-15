@@ -250,48 +250,6 @@ def load_measured() -> dict[str, Any]:
     return {str(key): value for key, value in raw.items()}
 
 
-def architecture(measured: dict[str, Any]) -> Scene:
-    scene = Scene()
-    scene.text(
-        "title",
-        MARGIN,
-        MARGIN,
-        "One pinned GGUF is served, measured, tuned, and trained against",
-        TITLE_SIZE,
-    )
-    gpu = str(measured.get("gpu_name", "RX 7800 XT"))
-    scene.box("client", 60, 140, 260, 80, "HTTP client", "input")
-    scene.box("gateway", 480, 140, 300, 90, "gateway\nauth, rate limit", "input")
-    scene.box("server", 480, 320, 300, 110, "llama-server\nCPU or HIP", "runtime")
-    scene.box("gguf", 480, 520, 300, 90, "pinned GGUF\nsha256 verified", "model")
-    scene.box("bench", 60, 300, 260, 90, "bench\nTTFT, ITL, tok/s", "analysis")
-    scene.box("tune", 60, 460, 260, 90, "tune\nllama-bench sweep", "analysis")
-    scene.box("train", 60, 620, 260, 90, "train\nllama-finetune", "model")
-    scene.box("kernel", 900, 620, 300, 90, "kernel\nHIP copy and GEMM", "hip")
-    scene.box("finetuned", 900, 460, 300, 90, "finetuned GGUF", "model")
-    scene.box("device", 900, 780, 300, 80, gpu, "hip")
-    scene.box("results", 480, 680, 300, 80, "results\nrun.json + report.md", "neutral")
-    scene.arrow("a-client", 320, 180, 150, 0, "requests", "input")
-    scene.arrow("a-gateway", 480, 200, 0, 110, "proxies", "input")
-    scene.arrow("a-load", 630, 430, 0, 85, "loads", "model")
-    scene.arrow("a-bench", 320, 340, 150, 30, "requests", "analysis")
-    scene.arrow("a-tune", 320, 500, 150, -80, "restarts", "analysis")
-    scene.arrow("a-train", 320, 665, 160, -100, "reads", "model")
-    scene.arrow("a-finetuned", 780, 505, 110, 0, "writes", "model")
-    scene.arrow("a-kernel", 1050, 710, 0, 70, "runs on", "hip")
-    scene.text(
-        "note",
-        60,
-        800,
-        "Every command writes a run record. A number enters the README only when "
-        "that record is valid.",
-        NOTE_SIZE,
-        colour=MUTED,
-        width=760,
-    )
-    return scene
-
-
 def methodology(measured: dict[str, Any]) -> Scene:
     cpu = measured["cpu"]
     gpu = measured["gpu"]
@@ -408,7 +366,6 @@ def main() -> int:
     measured = load_measured()
     FIGURES.mkdir(parents=True, exist_ok=True)
     for name, scene in (
-        ("architecture", architecture(measured)),
         ("bench-methodology", methodology(measured)),
         ("tuning-frontier", tuning(measured)),
     ):

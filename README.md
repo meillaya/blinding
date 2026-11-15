@@ -115,8 +115,6 @@ scripts/sandbox.sh run --rocm uv run blinding bench qwen2.5-7b-instruct:q4_k_m \
   --config configs/local-rocm.toml --parallel 4
 ```
 
-![One pinned model feeds four commands](docs/figures/architecture.png)
-
 ## What the commands do
 
 | command | job |
